@@ -10,17 +10,20 @@ Usage:
   python3 tests/test_tof.py
 
 Install library if needed:
-  pip install VL53L0X
+  pip install adafruit-blinka adafruit-circuitpython-vl53l0x
 """
 
-import VL53L0X
+import board
+import busio
+import adafruit_vl53l0x
 import time
 
 
 def main():
     print("Initialising VL53L0X...")
-    tof = VL53L0X.VL53L0X()
-    tof.start_ranging(VL53L0X.Vl53l0xAccuracyMode.BETTER)
+    i2c = busio.I2C(board.SCL, board.SDA)
+    tof = adafruit_vl53l0x.VL53L0X(i2c)
+    tof.measurement_timing_budget = 33000  # BETTER mode ~66 ms
     print("Ready. Hold objects at varying distances. Ctrl+C to exit.\n")
     print(f"{'#':>6}  {'mm':>10}  {'metres':>10}")
     print("-" * 32)
@@ -28,9 +31,9 @@ def main():
     n = 0
     try:
         while True:
-            d = tof.get_distance()
+            d = tof.range
             n += 1
-            if d > 0:
+            if d < 8190:
                 print(f"{n:>6}  {d:>10.1f}  {d/1000:>10.4f}")
             else:
                 print(f"{n:>6}  {'OUT OF RANGE':>10}")
@@ -38,7 +41,7 @@ def main():
     except KeyboardInterrupt:
         print("\nStopped.")
     finally:
-        tof.stop_ranging()
+        i2c.deinit()
         print("Sensor stopped.")
 
 
