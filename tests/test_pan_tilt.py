@@ -29,7 +29,7 @@ PA_STEP = 16;  PA_DIR = 20;  PA_EN = 21    # Motor A — theta (Z rotation)
 PB_STEP = 12;  PB_DIR = 7;   PB_EN = 8    # Motor B — phi   (arc position)
 
 STEP_DELAY = 0.002      # slower than production — safer for first test
-TEST_STEPS = 200
+TEST_STEPS = 2000
 PAUSE_S    = 1.0
 
 
