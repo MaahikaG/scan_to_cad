@@ -4,13 +4,20 @@ test_pan_tilt.py
 ────────────────
 Standalone pan-tilt motor test — NO ROS 2 required.
 
-Tests Motor A and Motor B independently, then tests differential moves
-(pure pan = both same direction, pure tilt = opposite directions).
+Tests Motor A (theta, Z rotation) and Motor B (phi, arc position)
+independently. Motors are mechanically independent at 1:1 ratio.
 
 Usage:
   python3 tests/test_pan_tilt.py
 
 Pin assignments must match pan_tilt_controller.py.
+
+Troubleshooting:
+  Motor doesn't move      → Check EN pin is LOW, VMOT connected,
+                             SLEEP+RESET tied together on TB6600.
+  Wrong direction         → Swap one coil pair (A+↔A− or B+↔B− on TB6600).
+  Skips steps / stalls    → Increase STEP_DELAY, or adjust TB6600 current
+                             limit DIP switches.
 """
 
 import RPi.GPIO as GPIO
@@ -18,10 +25,10 @@ import time
 import threading
 
 # ── Pin assignments — must match pan_tilt_controller.py ──────────────────────
-PA_STEP = 16;  PA_DIR = 20;  PA_EN = 21
-PB_STEP = 12;  PB_DIR = 7;   PB_EN = 8
+PA_STEP = 16;  PA_DIR = 20;  PA_EN = 21    # Motor A — theta (Z rotation)
+PB_STEP = 12;  PB_DIR = 7;   PB_EN = 8    # Motor B — phi   (arc position)
 
-STEP_DELAY = 0.002
+STEP_DELAY = 0.002      # slower than production — safer for first test
 TEST_STEPS = 200
 PAUSE_S    = 1.0
 
@@ -48,8 +55,8 @@ def move(step_pin, dir_pin, steps, label=""):
 
 
 def move_both(steps_a, steps_b):
-    t_a = threading.Thread(target=move, args=(PA_STEP, PA_DIR, steps_a, "Motor A"))
-    t_b = threading.Thread(target=move, args=(PB_STEP, PB_DIR, steps_b, "Motor B"))
+    t_a = threading.Thread(target=move, args=(PA_STEP, PA_DIR, steps_a, "Motor A (theta)"))
+    t_b = threading.Thread(target=move, args=(PB_STEP, PB_DIR, steps_b, "Motor B (phi)"))
     t_a.start(); t_b.start()
     t_a.join();  t_b.join()
 
@@ -64,30 +71,25 @@ def main():
         setup()
         time.sleep(0.5)
 
-        print("\n── Test 1: Motor A only ──────────────────────────────────────")
-        move(PA_STEP, PA_DIR,  TEST_STEPS, "Motor A")
+        print("\n── Test 1: Motor A (theta — Z rotation) ─────────────────────")
+        print("  Expected: pan-tilt head rotates CCW, pauses, returns CW.")
+        move(PA_STEP, PA_DIR,  TEST_STEPS, "Motor A (theta)")
         time.sleep(PAUSE_S)
-        move(PA_STEP, PA_DIR, -TEST_STEPS, "Motor A")
-        time.sleep(PAUSE_S)
-
-        print("\n── Test 2: Motor B only ──────────────────────────────────────")
-        move(PB_STEP, PB_DIR,  TEST_STEPS, "Motor B")
-        time.sleep(PAUSE_S)
-        move(PB_STEP, PB_DIR, -TEST_STEPS, "Motor B")
+        move(PA_STEP, PA_DIR, -TEST_STEPS, "Motor A (theta)")
         time.sleep(PAUSE_S)
 
-        print("\n── Test 3: Both same direction (pure pan) ────────────────────")
-        print("  Expected: head pans, no tilt change.")
+        print("\n── Test 2: Motor B (phi — arc position) ──────────────────────")
+        print("  Expected: pan-tilt head moves along arc toward phi=90, pauses, returns.")
+        move(PB_STEP, PB_DIR,  TEST_STEPS, "Motor B (phi)")
+        time.sleep(PAUSE_S)
+        move(PB_STEP, PB_DIR, -TEST_STEPS, "Motor B (phi)")
+        time.sleep(PAUSE_S)
+
+        print("\n── Test 3: Both motors simultaneously ────────────────────────")
+        print("  Expected: both axes move forward together, then both return.")
         move_both( TEST_STEPS,  TEST_STEPS)
         time.sleep(PAUSE_S)
         move_both(-TEST_STEPS, -TEST_STEPS)
-        time.sleep(PAUSE_S)
-
-        print("\n── Test 4: Opposite directions (pure tilt) ───────────────────")
-        print("  Expected: head tilts, no pan change.")
-        move_both( TEST_STEPS, -TEST_STEPS)
-        time.sleep(PAUSE_S)
-        move_both(-TEST_STEPS,  TEST_STEPS)
 
         print("\n✓ All pan-tilt tests complete.")
 
