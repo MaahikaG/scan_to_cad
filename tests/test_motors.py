@@ -33,7 +33,8 @@ M1_STEP = 17;  M1_DIR = 27;  M1_EN = 22    # Motor 1 (theta)
 M2_STEP = 23;  M2_DIR = 24;  M2_EN = 25    # Motor 2 (phi)
 
 STEP_DELAY = 0.002      # slower than production — safer for first test
-TEST_STEPS = 200
+TEST_STEPS = 200        # steps for Motor 1 test
+M2_FULL_REV = 200       # full revolution for Motor 2 (full step, NEMA 17 = 200 steps/rev)
 PAUSE_S    = 1.0
 
 
@@ -83,10 +84,10 @@ def main():
         time.sleep(PAUSE_S)
 
         print("\n── Test 2: Motor 2 (phi — arc position) ─────────────────────")
-        print("  Expected: head moves along arc toward phi=90, pauses, returns.")
-        move(M2_STEP, M2_DIR,  TEST_STEPS, "Motor 2 (phi)")
+        print("  Expected: head makes one full revolution forward, pauses, returns.")
+        move(M2_STEP, M2_DIR,  M2_FULL_REV, "Motor 2 (phi)")
         time.sleep(PAUSE_S)
-        move(M2_STEP, M2_DIR, -TEST_STEPS, "Motor 2 (phi)")
+        move(M2_STEP, M2_DIR, -M2_FULL_REV, "Motor 2 (phi)")
         time.sleep(PAUSE_S)
 
         print("\n── Test 3: Both motors simultaneously ────────────────────────")
