@@ -34,7 +34,7 @@ M2_STEP = 23;  M2_DIR = 24;  M2_EN = 25    # Motor 2 (phi)
 
 STEP_DELAY = 0.002      # slower than production — safer for first test
 TEST_STEPS = 200        # steps for Motor 1 test
-M2_FULL_REV = 200       # full revolution for Motor 2 (full step, NEMA 17 = 200 steps/rev)
+M2_FULL_REV = 600       # full revolution for Motor 2 (full step, NEMA 17 = 200 steps/rev)
 PAUSE_S    = 1.0
 
 
