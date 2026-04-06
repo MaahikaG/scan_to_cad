@@ -64,7 +64,11 @@ from rclpy.node import Node
 from nav_msgs.msg import Odometry
 from geometry_msgs.msg import TransformStamped, Vector3
 import tf2_ros
-import RPi.GPIO as GPIO
+try:
+    import RPi.GPIO as GPIO
+except RuntimeError:
+    from rpi_lgpio import GPIO
+    
 import math
 
 # ── GPIO pin assignments (BCM numbering) ──────────────────────────────────────

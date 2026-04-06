@@ -43,7 +43,10 @@ from rclpy.node import Node
 from nav_msgs.msg import Odometry
 from sensor_msgs.msg import Range
 from RPLCD.gpio import CharLCD
-import RPi.GPIO as GPIO
+try:
+    import RPi.GPIO as GPIO
+except RuntimeError:
+    from rpi_lgpio import GPIO
 
 # ── GPIO pin assignments (BCM numbering) ──────────────────────────────────────
 LCD_RS = 26

@@ -39,7 +39,10 @@ import rclpy
 from rclpy.node import Node
 from std_msgs.msg import Float32
 from geometry_msgs.msg import Vector3
-import RPi.GPIO as GPIO
+try:
+    import RPi.GPIO as GPIO
+except RuntimeError:
+    from rpi_lgpio import GPIO
 import time
 
 # ── Steps-per-revolution — TUNE TO YOUR DRIVER MICROSTEPPING SETTING ─────────
