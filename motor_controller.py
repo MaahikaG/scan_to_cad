@@ -57,7 +57,7 @@ PHI_LIMIT_DEG   = 120.0         # end-of-arc limit for Motor 2
 POSITION_TOL_DEG = 8.0          # acceptable position error in degrees
                                 # must be >= DEGREES_PER_COUNT (7.5° at 24 PPR)
 SERVO_TIMEOUT    = 10.0         # seconds to wait for servo encoder confirmation
-SERVO_SWEEP_TIME = 1.5          # seconds for a full 180° sweep
+SERVO_SWEEP_TIME = 4.0          # seconds for a full 180° sweep
 SERVO_INCREMENT_DEG = 2.0       # degrees per increment — smaller = smoother
 MAX_PHI_RETRIES  = 10           # max stall retries for Motor 2
 

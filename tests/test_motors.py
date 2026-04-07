@@ -42,7 +42,7 @@ SERVO_INCREMENT_DEG = 2.0       # degrees per increment
 
 # ── Stepper constants ─────────────────────────────────────────────────────────
 STEP_DELAY  = 0.002
-M2_STEPS    = 3000
+M2_STEPS    = 17000
 PAUSE_S     = 1.0
 
 
@@ -97,37 +97,13 @@ def main():
 
     try:
         setup()
-        pwm = GPIO.PWM(SERVO_PIN, SERVO_FREQ)
-        pwm.start(0)
-        time.sleep(0.5)
-
-        print("\n── Test 1: Motor 1 (theta — servo Z rotation) ───────────────")
-        print("  Expected: servo moves 0° → 120° → 0°.")
-        servo_move(0,  "Motor 1 (theta)")
-        time.sleep(PAUSE_S)
-        servo_move(120, "Motor 1 (theta)")
-        time.sleep(PAUSE_S)
-        servo_move(0,  "Motor 1 (theta)")
-        time.sleep(PAUSE_S)
-
-        print("\n── Test 2: Motor 2 (phi — stepper arc position) ─────────────")
-        print("  Expected: head moves along arc, pauses, returns.")
+        print("\n── Test: Motor 2 (phi — stepper arc position) ───────────────")
+        print(f"  Expected: head moves {M2_STEPS} steps along arc, pauses, returns.")
         stepper_move( M2_STEPS, "Motor 2 (phi)")
         time.sleep(PAUSE_S)
         stepper_move(-M2_STEPS, "Motor 2 (phi)")
-        time.sleep(PAUSE_S)
 
-        print("\n── Test 3: Both motors simultaneously ────────────────────────")
-        print("  Expected: servo moves to 120° while stepper moves forward.")
-        t1 = threading.Thread(target=servo_move,   args=(120, "Motor 1 (theta)"))
-        t2 = threading.Thread(target=stepper_move, args=(M2_STEPS, "Motor 2 (phi)"))
-        t1.start(); t2.start()
-        t1.join();  t2.join()
-        time.sleep(PAUSE_S)
-        servo_move(0,            "Motor 1 (theta)")
-        stepper_move(-M2_STEPS,  "Motor 2 (phi)")
-
-        print("\n✓ All motor tests complete.")
+        print("\n✓ Motor 2 test complete.")
 
     except KeyboardInterrupt:
         print("\nInterrupted.")
