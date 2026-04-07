@@ -45,7 +45,7 @@ SERVO_INCREMENT_DEG = 2.0       # degrees per increment
 STEP_DELAY        = 0.002
 M2_STEPS          = 16000
 CHUNK_SIZE        = 200         # steps per encoder-check batch
-ENC2_COUNT_LIMIT  = 50          # encoder counts at which Motor 2 stops — TUNE THIS
+ENC2_COUNT_LIMIT  = 350         # encoder counts at which Motor 2 stops — TUNE THIS
 PAUSE_S           = 1.0
 
 # ── Encoder state ─────────────────────────────────────────────────────────────
@@ -127,7 +127,7 @@ def main():
 
         print("\n── Test: Motor 1 (theta — servo) ────────────────────────────")
         print("  Expected: servo sweeps 0° → 120° → 0°.")
-        servo_move(120.0, "Motor 1 (theta)")
+        servo_move(140.0, "Motor 1 (theta)")
         time.sleep(PAUSE_S)
         servo_move(  0.0, "Motor 1 (theta)")
         time.sleep(PAUSE_S)
