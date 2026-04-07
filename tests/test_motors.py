@@ -46,7 +46,7 @@ SERVO_INCREMENT_DEG = 2.0       # degrees per increment
 STEP_DELAY        = 0.002
 M2_STEPS          = 16000
 CHUNK_SIZE        = 200         # steps per encoder-check batch
-ENC2_COUNT_LIMIT  = 990         # encoder counts at which Motor 2 stops
+ENC2_COUNT_LIMIT  = 1100        # encoder counts at which Motor 2 stops
 PAUSE_S           = 1.0
 
 # ── Encoder state ─────────────────────────────────────────────────────────────
