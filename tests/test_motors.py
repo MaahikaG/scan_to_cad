@@ -12,9 +12,8 @@ Usage:
   python3 tests/test_motors.py
 
 What it does:
-  1. Motor 1 (theta) — servo sweeps 0° → 120° → 300° → 0°.
-  2. Motor 2 (phi)   — stepper 600 steps forward, pause, 600 steps back.
-  3. Both simultaneously — servo sweeps while stepper moves.
+  1. Motor 1 (theta) — servo sweeps 0° → 180° → 0°.
+  2. Motor 2 (phi)   — stepper 17000 steps forward, pause, 17000 steps back.
 
 Troubleshooting:
   Servo doesn't move      → Check 24V power, PWM signal on BCM 13 (Pin 33).
@@ -89,7 +88,7 @@ def stepper_move(steps, label=""):
 
 
 def main():
-    global pwm, pwm_current_angle
+    global pwm
     pwm_current_angle = [0.0]   # tracks current servo angle for incremental moves
     print("═" * 60)
     print("  ScanToCAD — Gantry Motor Test")
@@ -97,6 +96,18 @@ def main():
 
     try:
         setup()
+        pwm = GPIO.PWM(SERVO_PIN, SERVO_FREQ)
+        pwm.start(angle_to_duty(0.0))
+        time.sleep(0.5)
+
+        print("\n── Test: Motor 1 (theta — servo) ────────────────────────────")
+        print("  Expected: servo sweeps 0° → 180° → 0°.")
+        servo_move(180.0, "Motor 1 (theta)")
+        time.sleep(PAUSE_S)
+        servo_move(  0.0, "Motor 1 (theta)")
+        time.sleep(PAUSE_S)
+        print("\n✓ Motor 1 test complete.")
+
         print("\n── Test: Motor 2 (phi — stepper arc position) ───────────────")
         print(f"  Expected: head moves {M2_STEPS} steps along arc, pauses, returns.")
         stepper_move( M2_STEPS, "Motor 2 (phi)")
