@@ -50,10 +50,10 @@ DEGREES_PER_COUNT = 360.0 / (PULSES_PER_REV * 2)   # x2 quadrature decoding
 
 # ── Scan parameters — tune these to your hardware ─────────────────────────────
 THETA_SWEEP_DEG  = 170.0        # one-way sweep angle for Motor 1
-PHI_STEP_COUNTS  = 118          # encoder counts to advance phi per Motor 1 sweep
-                                # = round(15/165 * 1300)
-PHI_LIMIT_COUNTS = 1300         # stop when enc2 count reaches this value
-STEPS_PER_COUNT  = 16           # empirical: ~16000 stepper steps = ~990 enc counts
+PHI_STEP_COUNTS  = 8            # encoder counts to advance phi per Motor 1 sweep
+                                # = round(15/165 * 85)
+PHI_LIMIT_COUNTS = 80           # stop when enc2 count reaches this value
+STEPS_PER_COUNT  = 188          # empirical: ~16000 stepper steps = ~85 enc counts
 
 # ── Control parameters ────────────────────────────────────────────────────────
 PHI_COUNT_TOL    = 5            # acceptable encoder count error for Motor 2
