@@ -53,8 +53,8 @@ ENC1_A = 5;   ENC1_B = 6    # Encoder 1 — Motor 1 (θ, Z rotation)
 ENC2_A = 14;  ENC2_B = 19   # Encoder 2 — Motor 2 (φ, arc position)
 
 # ── Physical constants — TUNE THESE TO YOUR HARDWARE ──────────────────────────
-PULSES_PER_REV = 600        # Encoder pulses per full shaft revolution (PPR).
-                            # From encoder datasheet. Common: 100, 200, 400, 600.
+PULSES_PER_REV = 24         # Encoder pulses per full shaft revolution (PPR).
+                            # PEL12T: 24 pulses per 360°.
                             # x2 quadrature decoding applied in code →
                             # effective resolution = PULSES_PER_REV * 2.
 
