@@ -127,7 +127,7 @@ def main():
 
         print("\n── Test: Motor 1 (theta — servo) ────────────────────────────")
         print("  Expected: servo sweeps 0° → 120° → 0°.")
-        servo_move(150.0, "Motor 1 (theta)")
+        servo_move(160.0, "Motor 1 (theta)")
         time.sleep(PAUSE_S)
         servo_move(  0.0, "Motor 1 (theta)")
         time.sleep(PAUSE_S)
