@@ -92,10 +92,10 @@ def main():
         time.sleep(0.5)
 
         print("\n── Test 1: Motor 1 (theta — servo Z rotation) ───────────────")
-        print("  Expected: servo moves 0° → 90° → 0°.")
+        print("  Expected: servo moves 0° → 150° → 0°.")
         servo_move(0,  "Motor 1 (theta)")
         time.sleep(PAUSE_S)
-        servo_move(90, "Motor 1 (theta)")
+        servo_move(150, "Motor 1 (theta)")
         time.sleep(PAUSE_S)
         servo_move(0,  "Motor 1 (theta)")
         time.sleep(PAUSE_S)
@@ -108,8 +108,8 @@ def main():
         time.sleep(PAUSE_S)
 
         print("\n── Test 3: Both motors simultaneously ────────────────────────")
-        print("  Expected: servo moves to 90° while stepper moves forward.")
-        t1 = threading.Thread(target=servo_move,   args=(90, "Motor 1 (theta)"))
+        print("  Expected: servo moves to 150° while stepper moves forward.")
+        t1 = threading.Thread(target=servo_move,   args=(150, "Motor 1 (theta)"))
         t2 = threading.Thread(target=stepper_move, args=(M2_STEPS, "Motor 2 (phi)"))
         t1.start(); t2.start()
         t1.join();  t2.join()
