@@ -31,6 +31,7 @@ import time
 # ── Pin assignments — must match motor_controller.py ──────────────────────────
 SERVO_PIN = 13                          # Motor 1 — theta (Z rotation)
 M2_STEP = 23;  M2_DIR = 24;  M2_EN = 25  # Motor 2 — phi (arc position)
+ENC1_A = 5;    ENC1_B = 6              # Encoder 1 — Motor 1 (theta)
 ENC2_A = 14;   ENC2_B = 19             # Encoder 2 — Motor 2 (phi)
 
 # ── Servo constants ───────────────────────────────────────────────────────────
@@ -45,11 +46,19 @@ SERVO_INCREMENT_DEG = 2.0       # degrees per increment
 STEP_DELAY        = 0.002
 M2_STEPS          = 16000
 CHUNK_SIZE        = 200         # steps per encoder-check batch
-ENC2_COUNT_LIMIT  = 1500        # encoder counts at which Motor 2 stops — TUNE THIS
+ENC2_COUNT_LIMIT  = 970         # encoder counts at which Motor 2 stops
 PAUSE_S           = 1.0
 
 # ── Encoder state ─────────────────────────────────────────────────────────────
+enc1_count = 0
 enc2_count = 0
+
+
+def enc1_cb(channel):
+    global enc1_count
+    a = GPIO.input(ENC1_A)
+    b = GPIO.input(ENC1_B)
+    enc1_count += 1 if a != b else -1
 
 
 def enc2_cb(channel):
@@ -72,10 +81,11 @@ def setup():
     for pin in [M2_STEP, M2_DIR, M2_EN]:
         GPIO.setup(pin, GPIO.OUT, initial=GPIO.LOW)
     GPIO.output(M2_EN, GPIO.LOW)
-    for pin in [ENC2_A, ENC2_B]:
+    for pin in [ENC1_A, ENC1_B, ENC2_A, ENC2_B]:
         GPIO.setup(pin, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+    GPIO.add_event_detect(ENC1_A, GPIO.BOTH, callback=enc1_cb)
     GPIO.add_event_detect(ENC2_A, GPIO.BOTH, callback=enc2_cb)
-    print("GPIO initialised. Servo, stepper driver, and encoder enabled.")
+    print("GPIO initialised. Servo, stepper driver, and encoders enabled.")
 
 
 def servo_move(angle, label=""):
@@ -128,6 +138,8 @@ def main():
         print("\n── Test: Motor 1 (theta — servo) ────────────────────────────")
         print("  Expected: servo sweeps 0° → 120° → 0°.")
         servo_move(170.0, "Motor 1 (theta)")
+        print(f"  Encoder 1 count after sweep: {enc1_count}  "
+              f"(positive = correct direction, negative = swap ENC1 A/B wires)")
         time.sleep(PAUSE_S)
         servo_move(  0.0, "Motor 1 (theta)")
         time.sleep(PAUSE_S)
@@ -146,6 +158,7 @@ def main():
             del pwm
         except Exception:
             pass
+        GPIO.remove_event_detect(ENC1_A)
         GPIO.remove_event_detect(ENC2_A)
         GPIO.output(M2_EN, GPIO.HIGH)
         GPIO.cleanup()

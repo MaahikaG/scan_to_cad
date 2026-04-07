@@ -49,15 +49,17 @@ PULSES_PER_REV    = 24          # encoder PPR — PEL12T: 24 pulses per 360°
 DEGREES_PER_COUNT = 360.0 / (PULSES_PER_REV * 2)   # x2 quadrature decoding
 
 # ── Scan parameters — tune these to your hardware ─────────────────────────────
-THETA_SWEEP_DEG = 180.0         # one-way sweep angle for Motor 1
-PHI_STEP_DEG    = 15.0          # phi advance per Motor 1 sweep
-PHI_LIMIT_DEG   = 120.0         # end-of-arc limit for Motor 2
+THETA_SWEEP_DEG  = 170.0        # one-way sweep angle for Motor 1
+PHI_STEP_COUNTS  = 88           # encoder counts to advance phi per Motor 1 sweep
+                                # = round(15/165 * 970)
+PHI_LIMIT_COUNTS = 970          # stop when enc2 count reaches this value
+STEPS_PER_COUNT  = 16           # empirical: ~16000 stepper steps = ~990 enc counts
 
 # ── Control parameters ────────────────────────────────────────────────────────
-POSITION_TOL_DEG = 8.0          # acceptable position error in degrees
-                                # must be >= DEGREES_PER_COUNT (7.5° at 24 PPR)
+PHI_COUNT_TOL    = 5            # acceptable encoder count error for Motor 2
+POSITION_TOL_DEG = 8.0          # acceptable position error for servo encoder
 SERVO_TIMEOUT    = 10.0         # seconds to wait for servo encoder confirmation
-SERVO_SWEEP_TIME = 4.0          # seconds for a full 180° sweep
+SERVO_SWEEP_TIME = 4.0          # seconds for a full 170° sweep
 SERVO_INCREMENT_DEG = 2.0       # degrees per increment — smaller = smoother
 MAX_PHI_RETRIES  = 10           # max stall retries for Motor 2
 
@@ -113,6 +115,11 @@ class GantryController:
         with self._lock:
             return self._enc2_count * DEGREES_PER_COUNT
 
+    @property
+    def phi_count(self):
+        with self._lock:
+            return self._enc2_count
+
     def _reset_encoders(self):
         with self._lock:
             self._enc1_count = 0
@@ -162,33 +169,33 @@ class GantryController:
             GPIO.output(M2_STEP, GPIO.LOW)
             time.sleep(STEP_DELAY)
 
-    def move_phi_by(self, delta_deg):
+    def move_phi_by_counts(self, delta_counts):
         """
-        Advance phi by delta_deg using encoder feedback.
+        Advance phi by delta_counts encoder counts using encoder feedback.
         Retries on stall up to MAX_PHI_RETRIES times.
         """
-        target = self.phi_deg + delta_deg
-        positive = delta_deg > 0
-        print(f"  Phi → {target:.1f}°")
+        target = self.phi_count + delta_counts
+        positive = delta_counts > 0
+        print(f"  Phi → count {target} (from {self.phi_count})")
 
         for attempt in range(MAX_PHI_RETRIES):
-            remaining = target - self.phi_deg
-            if abs(remaining) <= POSITION_TOL_DEG:
+            remaining = target - self.phi_count
+            if abs(remaining) <= PHI_COUNT_TOL:
                 break
-            steps = max(1, int(round(abs(remaining) / STEP_ANGLE_DEG)))
-            before = self.phi_deg
+            steps = max(1, int(round(abs(remaining) * STEPS_PER_COUNT)))
+            before = self.phi_count
             self._send_steps(steps, positive)
             time.sleep(0.1)     # brief settle before re-reading encoder
-            after = self.phi_deg
-            if abs(after - before) < 0.1 and abs(target - after) > POSITION_TOL_DEG:
-                print(f"  Phi stall at {self.phi_deg:.1f}° "
+            after = self.phi_count
+            if abs(after - before) < 1 and abs(target - after) > PHI_COUNT_TOL:
+                print(f"  Phi stall at count {self.phi_count} "
                       f"(attempt {attempt + 1}/{MAX_PHI_RETRIES}), retrying...")
 
-        if abs(self.phi_deg - target) <= POSITION_TOL_DEG:
-            print(f"  Phi reached {self.phi_deg:.1f}°")
+        if abs(self.phi_count - target) <= PHI_COUNT_TOL:
+            print(f"  Phi reached count {self.phi_count}")
         else:
-            print(f"  Warning: phi stopped at {self.phi_deg:.1f}° "
-                  f"(target {target:.1f}°) after {MAX_PHI_RETRIES} attempts")
+            print(f"  Warning: phi stopped at count {self.phi_count} "
+                  f"(target {target}) after {MAX_PHI_RETRIES} attempts")
 
     # ── Main scan loop ────────────────────────────────────────────────────────
 
@@ -212,23 +219,29 @@ class GantryController:
         while True:
             target = theta_targets[sweep_index % 2]
             print(f"─── Sweep {sweep_index + 1}: "
-                  f"theta → {target:.1f}°  |  phi = {self.phi_deg:.1f}°")
+                  f"theta → {target:.1f}°  |  phi count = {self.phi_count}")
 
             # Motor 1 sweep
             self.move_servo_to(target)
 
+            # Check if phi is already at limit before advancing
+            if self.phi_count >= PHI_LIMIT_COUNTS:
+                print(f"\nPhi limit reached (count {self.phi_count}). "
+                      f"Scan complete. Holding position.")
+                break
+
             # Motor 2 advance
-            self.move_phi_by(PHI_STEP_DEG)
+            self.move_phi_by_counts(PHI_STEP_COUNTS)
             sweep_index += 1
 
             # Check stop condition after phi advance
-            if self.phi_deg >= PHI_LIMIT_DEG:
+            if self.phi_count >= PHI_LIMIT_COUNTS:
                 final_target = theta_targets[sweep_index % 2]
-                print(f"\nPhi limit reached ({self.phi_deg:.1f}°). "
+                print(f"\nPhi limit reached (count {self.phi_count}). "
                       f"Completing final sweep to {final_target:.1f}°...")
                 self.move_servo_to(final_target)
                 print(f"\nScan complete. Holding position — "
-                      f"theta={self.theta_deg:.1f}°, phi={self.phi_deg:.1f}°")
+                      f"theta={self.theta_deg:.1f}°, phi count={self.phi_count}")
                 break
 
     # ── Cleanup ───────────────────────────────────────────────────────────────
