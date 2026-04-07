@@ -4,24 +4,24 @@ test_motors.py
 ──────────────
 Standalone gantry motor test — NO ROS 2 required.
 
-Run directly on the Pi to verify Motor 1 (theta) and Motor 2 (phi)
-are wired and working before launching any ROS 2 nodes.
+Run directly on the Pi to verify Motor 1 (servo, theta) and
+Motor 2 (stepper, phi) are wired and working before launching
+any ROS 2 nodes.
 
 Usage:
   python3 tests/test_motors.py
 
 What it does:
-  1. Motor 1 (theta) — 200 steps forward, pause, 200 steps back.
-  2. Motor 2 (phi)   — same.
-  3. Both simultaneously — 200 steps forward, then back.
+  1. Motor 1 (theta) — servo sweeps 0° → 150° → 300° → 0°.
+  2. Motor 2 (phi)   — stepper 600 steps forward, pause, 600 steps back.
+  3. Both simultaneously — servo sweeps while stepper moves.
 
 Troubleshooting:
-  Motor doesn't move      → Check EN pin is LOW, VMOT on 12V,
-                             SLEEP+RESET tied together on A4988.
-  Wrong direction         → Swap one coil pair (1A↔1B or 2A↔2B on A4988).
-  Skips steps / stalls    → Increase STEP_DELAY, or turn up A4988 current
-                             limit potentiometer (clockwise = more current).
-  One motor slower        → Different current limits on the two A4988 boards.
+  Servo doesn't move      → Check 24V power, PWM signal on BCM 13 (Pin 33).
+  Servo jitters           → Check PWM signal quality, ensure good ground connection.
+  Stepper doesn't move    → Check EN pin is LOW, VMOT connected,
+                            check TB6600 DIP switches.
+  Stepper wrong direction → Swap one coil pair (A+↔A− or B+↔B− on TB6600).
 """
 
 import RPi.GPIO as GPIO
@@ -29,79 +29,102 @@ import time
 import threading
 
 # ── Pin assignments — must match motor_controller.py ──────────────────────────
-M1_STEP = 17;  M1_DIR = 27;  M1_EN = 22    # Motor 1 (theta)
-M2_STEP = 23;  M2_DIR = 24;  M2_EN = 25    # Motor 2 (phi)
+SERVO_PIN = 13                          # Motor 1 — theta (Z rotation)
+M2_STEP = 23;  M2_DIR = 24;  M2_EN = 25  # Motor 2 — phi (arc position)
 
-STEP_DELAY = 0.002      # slower than production — safer for first test
-TEST_STEPS = 200        # steps for Motor 1 test
-M2_FULL_REV = 600       # full revolution for Motor 2 (full step, NEMA 17 = 200 steps/rev)
-PAUSE_S    = 1.0
+# ── Servo constants ───────────────────────────────────────────────────────────
+SERVO_FREQ      = 50
+SERVO_MIN_PULSE = 0.5
+SERVO_MAX_PULSE = 2.5
+SERVO_MAX_ANGLE = 300.0
+
+# ── Stepper constants ─────────────────────────────────────────────────────────
+STEP_DELAY  = 0.002
+M2_STEPS    = 600
+PAUSE_S     = 1.0
+
+
+def angle_to_duty(angle):
+    angle = max(0.0, min(SERVO_MAX_ANGLE, angle))
+    pulse_ms = SERVO_MIN_PULSE + (angle / SERVO_MAX_ANGLE) * \
+               (SERVO_MAX_PULSE - SERVO_MIN_PULSE)
+    return (pulse_ms / (1000.0 / SERVO_FREQ)) * 100.0
 
 
 def setup():
     GPIO.setmode(GPIO.BCM)
-    for pin in [M1_STEP, M1_DIR, M1_EN, M2_STEP, M2_DIR, M2_EN]:
+    GPIO.setup(SERVO_PIN, GPIO.OUT)
+    for pin in [M2_STEP, M2_DIR, M2_EN]:
         GPIO.setup(pin, GPIO.OUT, initial=GPIO.LOW)
-    GPIO.output(M1_EN, GPIO.LOW)
     GPIO.output(M2_EN, GPIO.LOW)
-    print("GPIO initialised. Both drivers enabled.")
+    print("GPIO initialised. Servo and stepper driver enabled.")
 
 
-def move(step_pin, dir_pin, steps, label=""):
+def servo_move(angle, label=""):
+    print(f"  {label}: moving to {angle}°...")
+    pwm.ChangeDutyCycle(angle_to_duty(angle))
+    time.sleep(0.5)
+    print(f"  {label}: done.")
+
+
+def stepper_move(steps, label=""):
     direction = "forward" if steps > 0 else "backward"
     print(f"  {label}: {abs(steps)} steps {direction}...")
-    GPIO.output(dir_pin, GPIO.HIGH if steps > 0 else GPIO.LOW)
+    GPIO.output(M2_DIR, GPIO.HIGH if steps > 0 else GPIO.LOW)
     for _ in range(abs(steps)):
-        GPIO.output(step_pin, GPIO.HIGH)
+        GPIO.output(M2_STEP, GPIO.HIGH)
         time.sleep(STEP_DELAY)
-        GPIO.output(step_pin, GPIO.LOW)
+        GPIO.output(M2_STEP, GPIO.LOW)
         time.sleep(STEP_DELAY)
     print(f"  {label}: done.")
 
 
-def move_both(steps_m1, steps_m2):
-    t1 = threading.Thread(target=move, args=(M1_STEP, M1_DIR, steps_m1, "Motor 1"))
-    t2 = threading.Thread(target=move, args=(M2_STEP, M2_DIR, steps_m2, "Motor 2"))
-    t1.start(); t2.start()
-    t1.join();  t2.join()
-
-
 def main():
+    global pwm
     print("═" * 60)
     print("  ScanToCAD — Gantry Motor Test")
-    print(f"  Steps: {TEST_STEPS}  |  Delay: {STEP_DELAY*1000:.1f} ms/edge")
     print("═" * 60)
 
     try:
         setup()
+        pwm = GPIO.PWM(SERVO_PIN, SERVO_FREQ)
+        pwm.start(0)
         time.sleep(0.5)
 
-        print("\n── Test 1: Motor 1 (theta — Z rotation) ─────────────────────")
-        print("  Expected: arm rotates CCW, pauses, returns CW.")
-        move(M1_STEP, M1_DIR,  TEST_STEPS, "Motor 1 (theta)")
+        print("\n── Test 1: Motor 1 (theta — servo Z rotation) ───────────────")
+        print("  Expected: servo sweeps 0° → 150° → 300° → 0°.")
+        servo_move(0,   "Motor 1 (theta)")
         time.sleep(PAUSE_S)
-        move(M1_STEP, M1_DIR, -TEST_STEPS, "Motor 1 (theta)")
+        servo_move(150, "Motor 1 (theta)")
+        time.sleep(PAUSE_S)
+        servo_move(300, "Motor 1 (theta)")
+        time.sleep(PAUSE_S)
+        servo_move(0,   "Motor 1 (theta)")
         time.sleep(PAUSE_S)
 
-        print("\n── Test 2: Motor 2 (phi — arc position) ─────────────────────")
-        print("  Expected: head makes one full revolution forward, pauses, returns.")
-        move(M2_STEP, M2_DIR,  M2_FULL_REV, "Motor 2 (phi)")
+        print("\n── Test 2: Motor 2 (phi — stepper arc position) ─────────────")
+        print("  Expected: head moves along arc, pauses, returns.")
+        stepper_move( M2_STEPS, "Motor 2 (phi)")
         time.sleep(PAUSE_S)
-        move(M2_STEP, M2_DIR, -M2_FULL_REV, "Motor 2 (phi)")
+        stepper_move(-M2_STEPS, "Motor 2 (phi)")
         time.sleep(PAUSE_S)
 
         print("\n── Test 3: Both motors simultaneously ────────────────────────")
-        print("  Expected: both move forward together, then both return.")
-        move_both( TEST_STEPS,  TEST_STEPS)
+        print("  Expected: servo sweeps to 150° while stepper moves forward.")
+        t1 = threading.Thread(target=servo_move,   args=(150, "Motor 1 (theta)"))
+        t2 = threading.Thread(target=stepper_move, args=(M2_STEPS, "Motor 2 (phi)"))
+        t1.start(); t2.start()
+        t1.join();  t2.join()
         time.sleep(PAUSE_S)
-        move_both(-TEST_STEPS, -TEST_STEPS)
+        servo_move(0,            "Motor 1 (theta)")
+        stepper_move(-M2_STEPS,  "Motor 2 (phi)")
 
         print("\n✓ All motor tests complete.")
 
     except KeyboardInterrupt:
         print("\nInterrupted.")
     finally:
-        GPIO.output(M1_EN, GPIO.HIGH)
+        pwm.stop()
         GPIO.output(M2_EN, GPIO.HIGH)
         GPIO.cleanup()
         print("GPIO cleaned up.")

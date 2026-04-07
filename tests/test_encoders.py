@@ -31,7 +31,7 @@ import time
 
 # ── Pin assignments — must match odom_tf_pubs.py ──────────────────────────────
 ENC1_A = 5;   ENC1_B = 6    # Encoder 1 — Motor 1 (theta)
-ENC2_A = 13;  ENC2_B = 19   # Encoder 2 — Motor 2 (phi)
+ENC2_A = 14;  ENC2_B = 19   # Encoder 2 — Motor 2 (phi)
 
 enc1_count = 0
 enc2_count = 0

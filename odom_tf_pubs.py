@@ -31,7 +31,7 @@ Topics published:
 
 GPIO (BCM numbering):
   Encoder 1 (Motor 1, θ):  A=5   B=6
-  Encoder 2 (Motor 2, φ):  A=13  B=19
+  Encoder 2 (Motor 2, φ):  A=14  B=19
 
 Constants to set before running:
   PULSES_PER_REV  — encoder PPR from datasheet
@@ -50,7 +50,7 @@ import math
 
 # ── GPIO pin assignments (BCM numbering) ──────────────────────────────────────
 ENC1_A = 5;   ENC1_B = 6    # Encoder 1 — Motor 1 (θ, Z rotation)
-ENC2_A = 13;  ENC2_B = 19   # Encoder 2 — Motor 2 (φ, arc position)
+ENC2_A = 14;  ENC2_B = 19   # Encoder 2 — Motor 2 (φ, arc position)
 
 # ── Physical constants — TUNE THESE TO YOUR HARDWARE ──────────────────────────
 PULSES_PER_REV = 600        # Encoder pulses per full shaft revolution (PPR).
