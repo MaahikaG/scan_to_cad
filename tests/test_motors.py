@@ -12,7 +12,7 @@ Usage:
   python3 tests/test_motors.py
 
 What it does:
-  1. Motor 1 (theta) — servo sweeps 0° → 180° → 0°.
+  1. Motor 1 (theta) — servo sweeps 0° → 160° → 0°.
   2. Motor 2 (phi)   — stepper 17000 steps forward, pause, 17000 steps back.
 
 Troubleshooting:
@@ -36,7 +36,7 @@ SERVO_FREQ      = 50
 SERVO_MIN_PULSE = 0.5
 SERVO_MAX_PULSE = 2.5
 SERVO_MAX_ANGLE     = 300.0
-SERVO_SWEEP_TIME    = 1.5       # seconds for a full 180° sweep
+SERVO_SWEEP_TIME    = 4.0       # seconds for a full 180° sweep
 SERVO_INCREMENT_DEG = 2.0       # degrees per increment
 
 # ── Stepper constants ─────────────────────────────────────────────────────────
@@ -88,7 +88,7 @@ def stepper_move(steps, label=""):
 
 
 def main():
-    global pwm
+    global pwm, pwm_current_angle
     pwm_current_angle = [0.0]   # tracks current servo angle for incremental moves
     print("═" * 60)
     print("  ScanToCAD — Gantry Motor Test")
@@ -101,8 +101,8 @@ def main():
         time.sleep(0.5)
 
         print("\n── Test: Motor 1 (theta — servo) ────────────────────────────")
-        print("  Expected: servo sweeps 0° → 180° → 0°.")
-        servo_move(180.0, "Motor 1 (theta)")
+        print("  Expected: servo sweeps 0° → 160° → 0°.")
+        servo_move(160.0, "Motor 1 (theta)")
         time.sleep(PAUSE_S)
         servo_move(  0.0, "Motor 1 (theta)")
         time.sleep(PAUSE_S)
