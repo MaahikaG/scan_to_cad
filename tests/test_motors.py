@@ -12,7 +12,7 @@ Usage:
   python3 tests/test_motors.py
 
 What it does:
-  1. Motor 1 (theta) — servo sweeps 0° → 160° → 0°.
+  1. Motor 1 (theta) — servo sweeps 0° → 120° → 0°.
   2. Motor 2 (phi)   — stepper 17000 steps forward, pause, 17000 steps back.
 
 Troubleshooting:
@@ -41,7 +41,7 @@ SERVO_INCREMENT_DEG = 2.0       # degrees per increment
 
 # ── Stepper constants ─────────────────────────────────────────────────────────
 STEP_DELAY  = 0.002
-M2_STEPS    = 17000
+M2_STEPS    = 16000
 PAUSE_S     = 1.0
 
 
@@ -101,8 +101,8 @@ def main():
         time.sleep(0.5)
 
         print("\n── Test: Motor 1 (theta — servo) ────────────────────────────")
-        print("  Expected: servo sweeps 0° → 160° → 0°.")
-        servo_move(160.0, "Motor 1 (theta)")
+        print("  Expected: servo sweeps 0° → 120° → 0°.")
+        servo_move(100.0, "Motor 1 (theta)")
         time.sleep(PAUSE_S)
         servo_move(  0.0, "Motor 1 (theta)")
         time.sleep(PAUSE_S)
@@ -110,9 +110,7 @@ def main():
 
         print("\n── Test: Motor 2 (phi — stepper arc position) ───────────────")
         print(f"  Expected: head moves {M2_STEPS} steps along arc, pauses, returns.")
-        stepper_move( M2_STEPS, "Motor 2 (phi)")
-        time.sleep(PAUSE_S)
-        stepper_move(-M2_STEPS, "Motor 2 (phi)")
+        stepper_move(M2_STEPS, "Motor 2 (phi)")
 
         print("\n✓ Motor 2 test complete.")
 
