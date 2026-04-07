@@ -11,7 +11,7 @@ import math
 import struct
 import numpy as np
 
-from scan_to_cad.odom_tf_pubs import ARC_RADIUS_M
+from scan_to_cad.odom_tf_pubs import ARC_RADIUS_M, THETA_HOME_DEG, PHI_HOME_DEG
 
 MAX_RANGE_M = 1.8
 MIN_RANGE_M = 0.05
@@ -26,12 +26,16 @@ class PointCloudPublisher(Node):
         self.theta_deg = 0.0
         self.phi_deg   = 0.0
         self.shutdown_flag = False
+        self._last_theta = THETA_HOME_DEG
+        self._last_phi   = PHI_HOME_DEG 
 
 
         # ── Subscribers ───────────────────────────────────────────────────────
         self.create_subscription(Odometry, '/odom', self._odom_callback, 10)
         self.create_subscription(Range, '/tof/range', self._range_callback, 10)
         self.create_subscription(Bool, '/scan_complete', self._on_scan_complete, 10)
+
+        self.create_subscription(Bool, '/clear_scan', self._on_clear, 10)
 
         # ── Publisher ─────────────────────────────────────────────────────────
         self.cloud_pub = self.create_publisher(PointCloud2, '/point_cloud', 10)
@@ -45,24 +49,34 @@ class PointCloudPublisher(Node):
     def _odom_callback(self, msg: Odometry):
         self.theta_deg = msg.twist.twist.linear.x
         self.phi_deg   = msg.twist.twist.linear.y
+    
+    def _on_clear(self, msg):
+        if msg.data:
+            self.points = []
+            self.accumulated_points = []
+            self.get_logger().info('Point cloud cleared')
 
     def _range_callback(self, msg: Range):
         d = msg.range
         if not (MIN_RANGE_M <= d <= MAX_RANGE_M):
             return
 
+        # Only add point if gantry position changed significantly
+        if self.points:
+            last = self._compute_point(d, self._last_theta, self._last_phi)
+            current = self._compute_point(d, self.theta_deg, self.phi_deg)
+            dist = math.sqrt(sum((a-b)**2 for a,b in zip(last, current)))
+            if dist < 0.005:  # skip if less than 5mm movement
+                return
+
+        self._last_theta = self.theta_deg
+        self._last_phi   = self.phi_deg
+        
         point = self._compute_point(d, self.theta_deg, self.phi_deg)
         self.points.append(point)
-        self.accumulated_points.append(list(point))  # ← fixed, uses point
-
+        self.accumulated_points.append(list(point))
         self.cloud_pub.publish(self._build_cloud_msg())
 
-        self.get_logger().debug(
-            f'Point #{len(self.points):05d} | '
-            f'θ={self.theta_deg:.1f}° φ={self.phi_deg:.1f}° | '
-            f'd={d:.3f} m | '
-            f'xyz=({point[0]:.3f}, {point[1]:.3f}, {point[2]:.3f})'
-        )
 
     def _on_scan_complete(self, msg):
         if msg.data:

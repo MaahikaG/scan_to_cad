@@ -8,7 +8,7 @@ class MockSensor(Node):
     def __init__(self):
         super().__init__('mock_sensor')
         self.pub = self.create_publisher(Range, '/tof/range', 10)
-        self.timer = self.create_timer(0.1, self.publish_range)
+        self.timer = self.create_timer(1, self.publish_range)
         self.get_logger().info('Mock sensor ready')
         self.create_subscription(Bool, '/scan_complete', self._on_scan_complete, 10)
         self.shutdown_flag = False
