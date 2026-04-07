@@ -36,11 +36,13 @@ M2_STEP = 23;  M2_DIR = 24;  M2_EN = 25  # Motor 2 — phi (arc position)
 SERVO_FREQ      = 50
 SERVO_MIN_PULSE = 0.5
 SERVO_MAX_PULSE = 2.5
-SERVO_MAX_ANGLE = 300.0
+SERVO_MAX_ANGLE     = 300.0
+SERVO_SWEEP_TIME    = 1.5       # seconds for a full 180° sweep
+SERVO_INCREMENT_DEG = 2.0       # degrees per increment
 
 # ── Stepper constants ─────────────────────────────────────────────────────────
 STEP_DELAY  = 0.002
-M2_STEPS    = 600
+M2_STEPS    = 3000
 PAUSE_S     = 1.0
 
 
@@ -62,8 +64,15 @@ def setup():
 
 def servo_move(angle, label=""):
     print(f"  {label}: moving to {angle}°...")
-    pwm.ChangeDutyCycle(angle_to_duty(angle))
-    time.sleep(0.5)
+    start_duty = pwm_current_angle[0]
+    delta = angle - start_duty
+    steps = max(1, int(round(abs(delta) / SERVO_INCREMENT_DEG)))
+    delay = (abs(delta) / 180.0) * SERVO_SWEEP_TIME / steps
+    for i in range(1, steps + 1):
+        intermediate = start_duty + (delta * i / steps)
+        pwm.ChangeDutyCycle(angle_to_duty(intermediate))
+        time.sleep(delay)
+    pwm_current_angle[0] = angle
     print(f"  {label}: done.")
 
 
@@ -80,7 +89,8 @@ def stepper_move(steps, label=""):
 
 
 def main():
-    global pwm
+    global pwm, pwm_current_angle
+    pwm_current_angle = [0.0]   # tracks current servo angle for incremental moves
     print("═" * 60)
     print("  ScanToCAD — Gantry Motor Test")
     print("═" * 60)
