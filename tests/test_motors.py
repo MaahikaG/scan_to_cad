@@ -46,23 +46,34 @@ SERVO_INCREMENT_DEG = 2.0       # degrees per increment
 STEP_DELAY        = 0.002
 M2_STEPS          = 16000
 CHUNK_SIZE        = 200         # steps per encoder-check batch
-ENC2_COUNT_LIMIT  = 1100        # encoder counts at which Motor 2 stops
+ENC2_COUNT_LIMIT  = 1300        # encoder counts at which Motor 2 stops
 PAUSE_S           = 1.0
 
 # ── Encoder state ─────────────────────────────────────────────────────────────
 enc1_count = 0
 enc2_count = 0
+_enc1_last_ms = 0.0
+_enc2_last_ms = 0.0
+DEBOUNCE_MS = 3.0       # milliseconds — filters contact bounce on PEL12T
 
 
 def enc1_cb(channel):
-    global enc1_count
+    global enc1_count, _enc1_last_ms
+    now = time.monotonic() * 1000.0
+    if now - _enc1_last_ms < DEBOUNCE_MS:
+        return
+    _enc1_last_ms = now
     a = GPIO.input(ENC1_A)
     b = GPIO.input(ENC1_B)
     enc1_count += 1 if a != b else -1
 
 
 def enc2_cb(channel):
-    global enc2_count
+    global enc2_count, _enc2_last_ms
+    now = time.monotonic() * 1000.0
+    if now - _enc2_last_ms < DEBOUNCE_MS:
+        return
+    _enc2_last_ms = now
     a = GPIO.input(ENC2_A)
     b = GPIO.input(ENC2_B)
     enc2_count += 1 if a != b else -1

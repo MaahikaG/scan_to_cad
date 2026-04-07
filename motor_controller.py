@@ -50,9 +50,9 @@ DEGREES_PER_COUNT = 360.0 / (PULSES_PER_REV * 2)   # x2 quadrature decoding
 
 # ── Scan parameters — tune these to your hardware ─────────────────────────────
 THETA_SWEEP_DEG  = 170.0        # one-way sweep angle for Motor 1
-PHI_STEP_COUNTS  = 100          # encoder counts to advance phi per Motor 1 sweep
-                                # = round(15/165 * 1100)
-PHI_LIMIT_COUNTS = 1100         # stop when enc2 count reaches this value
+PHI_STEP_COUNTS  = 118          # encoder counts to advance phi per Motor 1 sweep
+                                # = round(15/165 * 1300)
+PHI_LIMIT_COUNTS = 1300         # stop when enc2 count reaches this value
 STEPS_PER_COUNT  = 16           # empirical: ~16000 stepper steps = ~990 enc counts
 
 # ── Control parameters ────────────────────────────────────────────────────────
@@ -64,11 +64,16 @@ SERVO_INCREMENT_DEG = 2.0       # degrees per increment — smaller = smoother
 MAX_PHI_RETRIES  = 10           # max stall retries for Motor 2
 
 
+DEBOUNCE_MS = 3.0       # milliseconds — filters contact bounce on PEL12T
+
+
 class GantryController:
     def __init__(self):
         self._lock = threading.Lock()
         self._enc1_count = 0
         self._enc2_count = 0
+        self._enc1_last_ms = 0.0
+        self._enc2_last_ms = 0.0
 
         # ── GPIO setup ────────────────────────────────────────────────────────
         GPIO.setmode(GPIO.BCM)
@@ -92,12 +97,20 @@ class GantryController:
     # ── Encoder callbacks (run on GPIO interrupt thread) ──────────────────────
 
     def _enc1_cb(self, channel):
+        now = time.monotonic() * 1000.0
+        if now - self._enc1_last_ms < DEBOUNCE_MS:
+            return
+        self._enc1_last_ms = now
         a = GPIO.input(ENC1_A)
         b = GPIO.input(ENC1_B)
         with self._lock:
             self._enc1_count += 1 if a != b else -1
 
     def _enc2_cb(self, channel):
+        now = time.monotonic() * 1000.0
+        if now - self._enc2_last_ms < DEBOUNCE_MS:
+            return
+        self._enc2_last_ms = now
         a = GPIO.input(ENC2_A)
         b = GPIO.input(ENC2_B)
         with self._lock:
