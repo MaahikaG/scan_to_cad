@@ -57,6 +57,8 @@ PHI_LIMIT_DEG   = 120.0         # end-of-arc limit for Motor 2
 POSITION_TOL_DEG = 8.0          # acceptable position error in degrees
                                 # must be >= DEGREES_PER_COUNT (7.5° at 24 PPR)
 SERVO_TIMEOUT    = 10.0         # seconds to wait for servo encoder confirmation
+SERVO_SWEEP_TIME = 1.5          # seconds for a full 180° sweep
+SERVO_INCREMENT_DEG = 2.0       # degrees per increment — smaller = smoother
 MAX_PHI_RETRIES  = 10           # max stall retries for Motor 2
 
 
@@ -126,11 +128,21 @@ class GantryController:
 
     def move_servo_to(self, target_deg):
         """
-        Command servo to target_deg and wait for encoder confirmation.
+        Command servo to target_deg in small increments to limit speed.
         One attempt only — logs a warning and continues if not reached.
+        SERVO_SWEEP_TIME controls how long a full 180° sweep takes.
         """
         print(f"  Theta → {target_deg:.1f}°")
-        self._pwm.ChangeDutyCycle(self._angle_to_duty(target_deg))
+        current = self.theta_deg
+        delta = target_deg - current
+        steps = max(1, int(round(abs(delta) / SERVO_INCREMENT_DEG)))
+        delay = (abs(delta) / THETA_SWEEP_DEG) * SERVO_SWEEP_TIME / steps
+
+        for i in range(1, steps + 1):
+            intermediate = current + (delta * i / steps)
+            self._pwm.ChangeDutyCycle(self._angle_to_duty(intermediate))
+            time.sleep(delay)
+
         deadline = time.time() + SERVO_TIMEOUT
         while time.time() < deadline:
             if abs(self.theta_deg - target_deg) <= POSITION_TOL_DEG:
