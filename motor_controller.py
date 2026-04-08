@@ -59,10 +59,10 @@ PHI_LIMIT_STEPS     = 16000         # total phi steps before scan ends
 # ── Pan-tilt sweep parameters ─────────────────────────────────────────────────
 PT_STEP_DELAY       = 0.001         # seconds per pulse edge
 PT_STEP_DEG         = 1.8           # degrees per full step (NEMA 8, full step)
-PT_A_STEPS          = 200           # full 360° pan (360 / 1.8 = 200 steps)
-PT_A_INC            = 50            # Motor A steps per increment (stop every 90°)
-PT_B_ANGLE_1        = 45.0          # first tilt angle (degrees)  — TUNE THIS
-PT_B_ANGLE_2        = 90.0          # second tilt angle (degrees) — TUNE THIS
+PT_A_STEPS          = 1000          # full pan range (5x)
+PT_A_INC            = 250           # Motor A steps per increment (5x)
+PT_B_ANGLE_1        = 135.0         # first tilt angle (degrees)  — TUNE THIS
+PT_B_ANGLE_2        = 270.0         # second tilt angle (degrees) — TUNE THIS
 PT_PAUSE_S          = 0.15          # pause at each stop for TOF reading
 
 # ── Servo control parameters ──────────────────────────────────────────────────
