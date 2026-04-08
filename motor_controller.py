@@ -51,6 +51,7 @@ DEGREES_PER_COUNT = 360.0 / (PULSES_PER_REV * 2)   # x2 quadrature decoding
 
 # ── Scan parameters — tune these to your hardware ─────────────────────────────
 THETA_SWEEP_DEG = 170.0         # one-way sweep angle for Motor 1
+THETA_STEP_DEG  = 45.0          # stop every this many degrees during sweep
 PHI_STEP_STEPS  = 1455          # stepper steps to advance phi per Motor 1 sweep
                                 # = round(16000 * 15/165)
 PHI_LIMIT_STEPS = 16000         # total steps at which Motor 2 stops
@@ -185,13 +186,27 @@ class GantryController:
 
     # ── Main scan loop ────────────────────────────────────────────────────────
 
+    def _sweep_positions(self, from_deg, to_deg):
+        """
+        Generate a list of stop positions from from_deg to to_deg
+        in THETA_STEP_DEG increments, always including to_deg as the last point.
+        """
+        positions = []
+        step = THETA_STEP_DEG if to_deg > from_deg else -THETA_STEP_DEG
+        pos = from_deg + step
+        while (step > 0 and pos < to_deg) or (step < 0 and pos > to_deg):
+            positions.append(round(pos, 1))
+            pos += step
+        positions.append(to_deg)
+        return positions
+
     def run_scan(self):
         """
         Full scan pattern:
-          - Motor 1 sweeps 0° ↔ 180° repeatedly.
-          - Motor 2 advances PHI_STEP_DEG after every one-way sweep.
-          - When phi reaches PHI_LIMIT_DEG, Motor 1 completes one final
-            180° sweep then both motors hold position.
+          - Motor 1 sweeps 0° ↔ 170°, stopping every ~45°.
+          - Motor 2 advances PHI_STEP_STEPS after every one-way sweep.
+          - When phi reaches PHI_LIMIT_STEPS, Motor 1 completes one final
+            sweep then both motors hold position.
         """
         print("Homing to start position...")
         self.move_servo_to(0.0)
@@ -199,16 +214,20 @@ class GantryController:
         self._reset_encoders()
         print("Encoders zeroed. Starting scan.\n")
 
-        theta_targets = [THETA_SWEEP_DEG, 0.0]     # alternating sweep targets
+        sweep_ends = [THETA_SWEEP_DEG, 0.0]    # alternating sweep end targets
         sweep_index = 0
+        current_pos = 0.0
 
         while True:
-            target = theta_targets[sweep_index % 2]
+            end = sweep_ends[sweep_index % 2]
+            positions = self._sweep_positions(current_pos, end)
             print(f"─── Sweep {sweep_index + 1}: "
-                  f"theta → {target:.1f}°  |  phi steps = {self._phi_steps_sent}")
+                  f"{'→'.join(f'{p}°' for p in [current_pos] + positions)}  |  "
+                  f"phi steps = {self._phi_steps_sent}")
 
-            # Motor 1 sweep
-            self.move_servo_to(target)
+            for pos in positions:
+                self.move_servo_to(pos)
+            current_pos = end
 
             # Check if phi is already at limit before advancing
             if self._phi_steps_sent >= PHI_LIMIT_STEPS:
@@ -222,10 +241,12 @@ class GantryController:
 
             # Check stop condition after phi advance
             if self._phi_steps_sent >= PHI_LIMIT_STEPS:
-                final_target = theta_targets[sweep_index % 2]
+                end = sweep_ends[sweep_index % 2]
+                positions = self._sweep_positions(current_pos, end)
                 print(f"\nPhi limit reached ({self._phi_steps_sent} steps). "
-                      f"Completing final sweep to {final_target:.1f}°...")
-                self.move_servo_to(final_target)
+                      f"Completing final sweep to {end:.1f}°...")
+                for pos in positions:
+                    self.move_servo_to(pos)
                 print(f"\nScan complete. Holding position — "
                       f"theta={self.theta_deg:.1f}°, phi steps={self._phi_steps_sent}")
                 break
