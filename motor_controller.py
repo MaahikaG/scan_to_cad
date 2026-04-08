@@ -275,6 +275,7 @@ class GantryController:
     def cleanup(self):
         GPIO.remove_event_detect(ENC1_A)
         self._pwm.stop()
+        del self._pwm
         GPIO.output(M2_EN, GPIO.HIGH)
         GPIO.output(PA_EN, GPIO.HIGH)
         GPIO.output(PB_EN, GPIO.HIGH)
