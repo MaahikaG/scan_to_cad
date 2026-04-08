@@ -66,10 +66,7 @@ PT_B_INC            = 100           # Motor B steps per increment
 PT_PAUSE_S          = 0.15          # pause at each stop for TOF reading
 
 # ── Servo control parameters ──────────────────────────────────────────────────
-POSITION_TOL_DEG    = 8.0
-SERVO_TIMEOUT       = 10.0
-SERVO_SWEEP_TIME    = 4.0
-SERVO_INCREMENT_DEG = 2.0
+SERVO_SETTLE_S      = 2.0           # time to wait after sending servo command
 
 # ── Encoder debounce ──────────────────────────────────────────────────────────
 DEBOUNCE_MS         = 3.0
@@ -146,23 +143,9 @@ class GantryController:
         return (pulse_ms / (1000.0 / SERVO_FREQ)) * 100.0
 
     def move_servo_to(self, target_deg):
-        print(f"  Gantry θ → {target_deg:.1f}°")
-        current = self.theta_deg
-        delta   = target_deg - current
-        steps   = max(1, int(round(abs(delta) / SERVO_INCREMENT_DEG)))
-        delay   = (abs(delta) / THETA_SWEEP_DEG) * SERVO_SWEEP_TIME / steps
-        for i in range(1, steps + 1):
-            self._pwm.ChangeDutyCycle(
-                self._angle_to_duty(current + delta * i / steps))
-            time.sleep(delay)
-        deadline = time.time() + SERVO_TIMEOUT
-        while time.time() < deadline:
-            if abs(self.theta_deg - target_deg) <= POSITION_TOL_DEG:
-                print(f"  Gantry θ reached {self.theta_deg:.1f}°")
-                return
-            time.sleep(0.05)
-        print(f"  Warning: servo did not confirm {target_deg:.1f}° "
-              f"(encoder at {self.theta_deg:.1f}°) — continuing")
+        self._pwm.ChangeDutyCycle(self._angle_to_duty(target_deg))
+        time.sleep(SERVO_SETTLE_S)
+        print(f"  Gantry θ → {target_deg:.1f}° (encoder reads {self.theta_deg:.1f}°)")
 
     # ── Gantry phi control ────────────────────────────────────────────────────
 
