@@ -27,11 +27,16 @@ Topics published:
       x = α (pan)  in degrees
       y = β (tilt) in degrees
       z = 0 (unused)
+
+  /odom_raw  (std_msgs/Float32MultiArray)
+      data[0] = θ (gantry theta) in degrees
+      data[1] = φ (gantry phi)   in degrees
 """
 
 import rclpy
 from rclpy.node import Node
 from geometry_msgs.msg import Vector3
+from std_msgs.msg import Float32MultiArray
 
 try:
     import RPi.GPIO as GPIO
@@ -117,11 +122,13 @@ class MotorController(Node):
             GPIO.setup(pin, GPIO.IN, pull_up_down=GPIO.PUD_UP)
         GPIO.add_event_detect(ENC1_A, GPIO.BOTH, callback=self._enc1_cb)
 
-        # ── ROS publisher ─────────────────────────────────────────────────────
-        self.angles_pub = self.create_publisher(Vector3, '/pan_tilt/angles', 10)
+        # ── ROS publishers ────────────────────────────────────────────────────
+        self.angles_pub   = self.create_publisher(Vector3,          '/pan_tilt/angles', 10)
+        self.odom_raw_pub = self.create_publisher(Float32MultiArray, '/odom_raw',        10)
 
-        # Publish zero angles at startup
+        # Publish zero values at startup
         self._publish_angles()
+        self._publish_odom_raw()
 
         self.get_logger().info('Motor controller ready — starting scan...')
 
@@ -148,14 +155,23 @@ class MotorController(Node):
         with self._lock:
             return self._enc1_count * DEGREES_PER_COUNT
 
+    @property
+    def phi_deg(self):
+        return self._phi_steps_sent / PHI_LIMIT_STEPS * 180.0
+
     # ── ROS publishing ────────────────────────────────────────────────────────
 
     def _publish_angles(self):
         msg = Vector3()
-        msg.x = self._pt_a_steps * PT_STEP_DEG   # alpha in degrees
-        msg.y = self._pt_b_steps * PT_STEP_DEG   # beta in degrees
+        msg.x = self._pt_a_steps * PT_STEP_DEG
+        msg.y = self._pt_b_steps * PT_STEP_DEG
         msg.z = 0.0
         self.angles_pub.publish(msg)
+
+    def _publish_odom_raw(self):
+        msg = Float32MultiArray()
+        msg.data = [float(self.theta_deg), float(self.phi_deg)]
+        self.odom_raw_pub.publish(msg)
 
     # ── Low-level motor helpers ───────────────────────────────────────────────
 
@@ -178,6 +194,7 @@ class MotorController(Node):
     def move_servo_to(self, target_deg):
         self._pwm.ChangeDutyCycle(self._angle_to_duty(target_deg))
         time.sleep(SERVO_SETTLE_S)
+        self._publish_odom_raw()
         self.get_logger().info(
             f'Gantry θ → {target_deg:.1f}° '
             f'(encoder reads {self.theta_deg:.1f}°)'
@@ -192,6 +209,7 @@ class MotorController(Node):
         )
         self._step(M2_STEP, M2_DIR, n_steps, positive=True)
         self._phi_steps_sent += n_steps
+        self._publish_odom_raw()
 
     # ── Pan-tilt sweep ────────────────────────────────────────────────────────
 
@@ -205,7 +223,6 @@ class MotorController(Node):
                 self._pt_a_steps = a_target
                 self._publish_angles()
             time.sleep(PT_PAUSE_S)
-        # Return Motor A to home
         if self._pt_a_steps > 0:
             self._step(PA_STEP, PA_DIR, self._pt_a_steps,
                        False, PT_STEP_DELAY)
