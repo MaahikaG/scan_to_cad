@@ -59,10 +59,10 @@ PHI_LIMIT_STEPS     = 16000         # total phi steps before scan ends
 # ── Pan-tilt sweep parameters ─────────────────────────────────────────────────
 PT_STEP_DELAY       = 0.001         # seconds per pulse edge
 PT_STEP_DEG         = 1.8           # degrees per full step (NEMA 8, full step)
-PT_A_STEPS          = 400           # full range of Motor A (pan)  — TUNE THIS
-PT_B_STEPS          = 400           # full range of Motor B (tilt) — TUNE THIS
-PT_A_INC            = 100           # Motor A steps per increment
-PT_B_INC            = 100           # Motor B steps per increment
+PT_A_STEPS          = 200           # full 360° pan (360 / 1.8 = 200 steps)
+PT_A_INC            = 50            # Motor A steps per increment (stop every 90°)
+PT_B_ANGLE_1        = 45.0          # first tilt angle (degrees)  — TUNE THIS
+PT_B_ANGLE_2        = 90.0          # second tilt angle (degrees) — TUNE THIS
 PT_PAUSE_S          = 0.15          # pause at each stop for TOF reading
 
 # ── Servo control parameters ──────────────────────────────────────────────────
@@ -157,42 +157,47 @@ class GantryController:
 
     # ── Pan-tilt sweep ────────────────────────────────────────────────────────
 
-    def _pan_tilt_sweep(self, theta_g):
-        """
-        Full 2D pan-tilt sweep at the current gantry theta position.
-        Motor A steps through its range in PT_A_INC increments.
-        At each A position, Motor B sweeps its full range and returns.
-        Pauses at every stop so the TOF sensor can capture a reading.
-        """
+    def _pan_360(self):
+        """Pan Motor A a full 360° in increments, pausing at each stop, then return."""
         a_positions = list(range(0, PT_A_STEPS, PT_A_INC)) + [PT_A_STEPS]
-
         for a_target in a_positions:
             a_delta = a_target - self._pt_a_steps
             if a_delta != 0:
                 self._step(PA_STEP, PA_DIR, abs(a_delta),
                            a_delta > 0, PT_STEP_DELAY)
                 self._pt_a_steps = a_target
-
-            b_positions = list(range(0, PT_B_STEPS, PT_B_INC)) + [PT_B_STEPS]
-            for b_target in b_positions:
-                b_delta = b_target - self._pt_b_steps
-                if b_delta != 0:
-                    self._step(PB_STEP, PB_DIR, abs(b_delta),
-                               b_delta > 0, PT_STEP_DELAY)
-                    self._pt_b_steps = b_target
-                time.sleep(PT_PAUSE_S)
-
-            # Return Motor B to home
-            if self._pt_b_steps > 0:
-                self._step(PB_STEP, PB_DIR, self._pt_b_steps,
-                           False, PT_STEP_DELAY)
-                self._pt_b_steps = 0
-
+            time.sleep(PT_PAUSE_S)
         # Return Motor A to home
         if self._pt_a_steps > 0:
             self._step(PA_STEP, PA_DIR, self._pt_a_steps,
                        False, PT_STEP_DELAY)
             self._pt_a_steps = 0
+
+    def _move_tilt_to(self, angle_deg):
+        """Move Motor B to the given tilt angle in degrees."""
+        target_steps = int(round(angle_deg / PT_STEP_DEG))
+        delta = target_steps - self._pt_b_steps
+        if delta != 0:
+            self._step(PB_STEP, PB_DIR, abs(delta),
+                       delta > 0, PT_STEP_DELAY)
+            self._pt_b_steps = target_steps
+
+    def _pan_tilt_sweep(self, theta_g):
+        """
+        At the current gantry theta stop:
+          1. Move tilt to PT_B_ANGLE_1, pan full 360°.
+          2. Move tilt to PT_B_ANGLE_2, pan full 360°.
+          3. Return tilt to home (0°).
+        """
+        self._move_tilt_to(PT_B_ANGLE_1)
+        print(f"    Tilt → {PT_B_ANGLE_1}°, panning 360°")
+        self._pan_360()
+
+        self._move_tilt_to(PT_B_ANGLE_2)
+        print(f"    Tilt → {PT_B_ANGLE_2}°, panning 360°")
+        self._pan_360()
+
+        self._move_tilt_to(0.0)
 
     # ── Main scan loop ────────────────────────────────────────────────────────
 
