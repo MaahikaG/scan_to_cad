@@ -68,8 +68,8 @@ PULSES_PER_REV      = 24
 DEGREES_PER_COUNT   = 360.0 / (PULSES_PER_REV * 2)
 
 # ── Gantry scan parameters — smaller steps for finer resolution ───────────────
-THETA_FORWARD_STOPS = [0.0, 10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0, 90.0, 100.0, 110.0, 120.0, 130.0, 140.0, 150.0, 160.0]
-THETA_RETURN_STOPS  = [160.0, 150.0, 140.0, 130.0, 120.0, 110.0, 100.0, 90.0, 80.0, 70.0, 60.0, 50.0, 40.0, 30.0, 20.0, 10.0, 0.0]
+THETA_FORWARD_STOPS = [float(x) for x in range(0, 165, 5)]
+THETA_RETURN_STOPS  = [float(x) for x in range(160, -5, -5)]
 PHI_STEP_STEPS      = 500           # smaller phi steps per sweep
 PHI_LIMIT_STEPS     = 16000
 
