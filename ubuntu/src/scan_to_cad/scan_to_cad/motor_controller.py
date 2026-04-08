@@ -3,6 +3,8 @@
 motor_controller.py
 ───────────────────
 ROS2 node controller for all four motors.
+Motor control logic is identical to the original standalone script.
+Uses MultiThreadedExecutor and locked publishers for thread safety.
 
 SCAN PATTERN:
   Gantry Motor 1 (servo, theta) sweeps 0° → 170° → 0° → ... in ~45° steps.
@@ -34,6 +36,7 @@ Topics published:
 """
 
 import rclpy
+import rclpy.executors
 from rclpy.node import Node
 from geometry_msgs.msg import Vector3
 from std_msgs.msg import Float32MultiArray
@@ -65,7 +68,7 @@ SERVO_RANGE_DEG     = 300.0
 # ── Gantry stepper constants ──────────────────────────────────────────────────
 STEP_DELAY          = 0.001
 
-# ── Encoder constants (gantry theta only) ────────────────────────────────────
+# ── Encoder constants (gantry theta only) ─────────────────────────────────────
 PULSES_PER_REV      = 24
 DEGREES_PER_COUNT   = 360.0 / (PULSES_PER_REV * 2)
 
@@ -75,14 +78,14 @@ THETA_RETURN_STOPS  = [160.0, 135.0, 100.0, 0.0]
 PHI_STEP_STEPS      = 2909
 PHI_LIMIT_STEPS     = 16000
 
-# ── Pan-tilt sweep parameters ─────────────────────────────────────────────────
-PT_STEP_DELAY = 0.005
-PT_STEP_DEG = 1.8 / 8
-PT_A_STEPS          = 400
-PT_A_INC            = 100
-PT_B_ANGLE_1        = 225.0
-PT_B_ANGLE_2        = 450.0
-PT_PAUSE_S          = 0.15
+# ── Pan-tilt sweep parameters — identical to original ─────────────────────────
+PT_STEP_DELAY       = 0.001         # seconds per pulse edge
+PT_STEP_DEG         = 1.8           # degrees per full step (NEMA 8, full step)
+PT_A_STEPS          = 400           # full pan range
+PT_A_INC            = 100           # Motor A steps per increment
+PT_B_ANGLE_1        = 225.0         # first tilt angle (degrees)
+PT_B_ANGLE_2        = 450.0         # second tilt angle (degrees)
+PT_PAUSE_S          = 0.15          # pause at each stop for TOF reading
 
 # ── Servo control parameters ──────────────────────────────────────────────────
 SERVO_SETTLE_S      = 2.0
@@ -96,13 +99,14 @@ class MotorController(Node):
         super().__init__('motor_controller')
 
         self._lock            = threading.Lock()
+        self._pub_lock        = threading.Lock()
         self._enc1_count      = 0
         self._enc1_last_ms    = 0.0
         self._phi_steps_sent  = 0
         self._pt_a_steps      = 0
         self._pt_b_steps      = 0
 
-        # ── GPIO setup ────────────────────────────────────────────────────────
+        # ── GPIO setup — identical to original ───────────────────────────────
         GPIO.setmode(GPIO.BCM)
 
         GPIO.setup(SERVO_PIN, GPIO.OUT)
@@ -132,11 +136,11 @@ class MotorController(Node):
 
         self.get_logger().info('Motor controller ready — starting scan...')
 
-        # Run scan in background thread so ROS can still spin
+        # Run scan in background thread so ROS executor can still spin
         self._scan_thread = threading.Thread(target=self.run_scan, daemon=True)
         self._scan_thread.start()
 
-    # ── Encoder callback ──────────────────────────────────────────────────────
+    # ── Encoder callback — identical to original ──────────────────────────────
 
     def _enc1_cb(self, channel):
         now = time.monotonic() * 1000.0
@@ -148,7 +152,7 @@ class MotorController(Node):
         with self._lock:
             self._enc1_count += 1 if a != b else -1
 
-    # ── Position properties ───────────────────────────────────────────────────
+    # ── Position properties — identical to original ───────────────────────────
 
     @property
     def theta_deg(self):
@@ -159,21 +163,23 @@ class MotorController(Node):
     def phi_deg(self):
         return self._phi_steps_sent / PHI_LIMIT_STEPS * 180.0
 
-    # ── ROS publishing ────────────────────────────────────────────────────────
+    # ── Thread-safe ROS publishing ────────────────────────────────────────────
 
     def _publish_angles(self):
         msg = Vector3()
         msg.x = self._pt_a_steps * PT_STEP_DEG
         msg.y = self._pt_b_steps * PT_STEP_DEG
         msg.z = 0.0
-        self.angles_pub.publish(msg)
+        with self._pub_lock:
+            self.angles_pub.publish(msg)
 
     def _publish_odom_raw(self):
         msg = Float32MultiArray()
         msg.data = [float(self.theta_deg), float(self.phi_deg)]
-        self.odom_raw_pub.publish(msg)
+        with self._pub_lock:
+            self.odom_raw_pub.publish(msg)
 
-    # ── Low-level motor helpers ───────────────────────────────────────────────
+    # ── Low-level motor helpers — identical to original ───────────────────────
 
     def _step(self, step_pin, dir_pin, n_steps, positive, delay=STEP_DELAY):
         GPIO.output(dir_pin, GPIO.HIGH if positive else GPIO.LOW)
@@ -183,7 +189,7 @@ class MotorController(Node):
             GPIO.output(step_pin, GPIO.LOW)
             time.sleep(delay)
 
-    # ── Servo control ─────────────────────────────────────────────────────────
+    # ── Servo control — identical to original ─────────────────────────────────
 
     def _angle_to_duty(self, angle):
         angle    = max(0.0, min(SERVO_RANGE_DEG, angle))
@@ -200,7 +206,7 @@ class MotorController(Node):
             f'(encoder reads {self.theta_deg:.1f}°)'
         )
 
-    # ── Gantry phi control ────────────────────────────────────────────────────
+    # ── Gantry phi control — identical to original ────────────────────────────
 
     def move_phi_steps(self, n_steps):
         self.get_logger().info(
@@ -211,9 +217,10 @@ class MotorController(Node):
         self._phi_steps_sent += n_steps
         self._publish_odom_raw()
 
-    # ── Pan-tilt sweep ────────────────────────────────────────────────────────
+    # ── Pan-tilt sweep — identical to original ────────────────────────────────
 
     def _pan_360(self):
+        """Pan Motor A a full 360° in increments, pausing at each stop, then return."""
         a_positions = list(range(0, PT_A_STEPS, PT_A_INC)) + [PT_A_STEPS]
         for a_target in a_positions:
             a_delta = a_target - self._pt_a_steps
@@ -223,6 +230,7 @@ class MotorController(Node):
                 self._pt_a_steps = a_target
                 self._publish_angles()
             time.sleep(PT_PAUSE_S)
+        # Return Motor A to home
         if self._pt_a_steps > 0:
             self._step(PA_STEP, PA_DIR, self._pt_a_steps,
                        False, PT_STEP_DELAY)
@@ -230,6 +238,7 @@ class MotorController(Node):
             self._publish_angles()
 
     def _move_tilt_to(self, angle_deg):
+        """Move Motor B to the given tilt angle in degrees."""
         target_steps = int(round(angle_deg / PT_STEP_DEG))
         delta = target_steps - self._pt_b_steps
         if delta != 0:
@@ -239,6 +248,12 @@ class MotorController(Node):
             self._publish_angles()
 
     def _pan_tilt_sweep(self, theta_g):
+        """
+        At the current gantry theta stop:
+          1. Move tilt to PT_B_ANGLE_1, pan full 360°.
+          2. Move tilt to PT_B_ANGLE_2, pan full 360°.
+          3. Return tilt to home (0°).
+        """
         self._move_tilt_to(PT_B_ANGLE_1)
         self.get_logger().info(f'Tilt → {PT_B_ANGLE_1}°, panning 360°')
         self._pan_360()
@@ -249,7 +264,7 @@ class MotorController(Node):
 
         self._move_tilt_to(0.0)
 
-    # ── Main scan loop ────────────────────────────────────────────────────────
+    # ── Main scan loop — identical to original ────────────────────────────────
 
     def run_scan(self):
         self.get_logger().info('Homing servo to 0°...')
@@ -290,7 +305,7 @@ class MotorController(Node):
                 self.get_logger().info('Scan complete.')
                 break
 
-    # ── Cleanup ───────────────────────────────────────────────────────────────
+    # ── Cleanup — identical to original ──────────────────────────────────────
 
     def destroy_node(self):
         GPIO.remove_event_detect(ENC1_A)
@@ -306,8 +321,10 @@ class MotorController(Node):
 def main(args=None):
     rclpy.init(args=args)
     node = MotorController()
+    executor = rclpy.executors.MultiThreadedExecutor()
+    executor.add_node(node)
     try:
-        rclpy.spin(node)
+        executor.spin()
     except KeyboardInterrupt:
         pass
     finally:
