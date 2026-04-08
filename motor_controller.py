@@ -198,6 +198,9 @@ class GantryController:
     # ── Main scan loop ────────────────────────────────────────────────────────
 
     def run_scan(self):
+        print("Homing servo to 0°...")
+        self.move_servo_to(0.0)
+
         print("Moving chain 16000 steps forward...")
         self.move_phi_steps(PHI_STEP_STEPS, forward=True)
 
