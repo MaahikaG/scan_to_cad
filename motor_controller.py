@@ -198,30 +198,13 @@ class GantryController:
     # ── Main scan loop ────────────────────────────────────────────────────────
 
     def run_scan(self):
-        print("Homing servo to 0°...")
-        self.move_servo_to(0.0)
-        time.sleep(0.5)
-        with self._lock:
-            self._enc1_count = 0
-        print("Encoder zeroed. Starting scan.\n")
+        print("Moving chain 16000 steps forward...")
+        self.move_phi_steps(PHI_STEP_STEPS, forward=True)
 
-        sweep_stops = [THETA_FORWARD_STOPS, THETA_RETURN_STOPS]
-        sweep_index = 0
-        chain_step  = 0  # increments each servo stop; even=forward, odd=reverse
+        print("Moving servo to 160°...")
+        self.move_servo_to(160.0)
 
-        while True:
-            stops = sweep_stops[sweep_index % 2]
-            print(f"═══ Sweep {sweep_index + 1} │ "
-                  f"{'→'.join(f'{p}°' for p in stops)}")
-
-            for pos in stops:
-                self.move_servo_to(pos)
-                # self._pan_tilt_sweep(pos)  # disabled for now
-                forward = (chain_step % 2 == 0)
-                self.move_phi_steps(PHI_STEP_STEPS, forward=forward)
-                chain_step += 1
-
-            sweep_index += 1
+        print("Done.")
 
     # ── Cleanup ───────────────────────────────────────────────────────────────
 
