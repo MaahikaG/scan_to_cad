@@ -3,14 +3,9 @@
 motor_controller.py
 ───────────────────
 ROS2 node controller for all four motors.
-Pan-tilt is disabled — sensor stays at neutral (0, 0) facing origin.
-Gantry steps are smaller for finer scan resolution.
-
-SCAN PATTERN:
-  Gantry Motor 1 (servo, theta) sweeps 0° → 170° → 0° → ... in small steps.
-  Gantry Motor 2 (stepper, phi) advances by PHI_STEP_STEPS after each sweep.
-  Scan ends when phi reaches PHI_LIMIT_STEPS.
-  Pan-tilt stays at (0, 0) — no pan or tilt movement.
+Pan-tilt disabled — sensor stays at neutral (0, 0) facing origin.
+Gantry servo rotates continuously and slowly, publishing odom at 20Hz.
+After each full sweep, phi advances by PHI_STEP_STEPS.
 
 GPIO (BCM numbering):
   Gantry Motor 1 (servo, θ):   PWM=13
@@ -20,14 +15,8 @@ GPIO (BCM numbering):
   Pan-tilt Motor B (tilt):     STEP=12  DIR=7   EN=8   (disabled)
 
 Topics published:
-  /pan_tilt/angles  (geometry_msgs/Vector3)
-      x = 0.0 (pan  — fixed at neutral)
-      y = 0.0 (tilt — fixed at neutral)
-      z = 0.0
-
-  /odom_raw  (std_msgs/Float32MultiArray)
-      data[0] = θ (gantry theta) in degrees
-      data[1] = φ (gantry phi)   in degrees
+  /pan_tilt/angles  (geometry_msgs/Vector3)  — always (0, 0, 0)
+  /odom_raw         (std_msgs/Float32MultiArray) — at 20Hz continuously
 """
 
 import rclpy
@@ -50,7 +39,7 @@ SERVO_PIN = 13
 M2_STEP = 23;  M2_DIR = 24;  M2_EN = 25
 ENC1_A = 5;    ENC1_B = 6
 
-# ── GPIO pins — pan-tilt (set up but not driven) ──────────────────────────────
+# ── GPIO pins — pan-tilt (disabled) ──────────────────────────────────────────
 PA_STEP = 16;  PA_DIR = 20;  PA_EN = 21
 PB_STEP = 12;  PB_DIR = 7;   PB_EN = 8
 
@@ -63,24 +52,23 @@ SERVO_RANGE_DEG     = 300.0
 # ── Gantry stepper constants ──────────────────────────────────────────────────
 STEP_DELAY          = 0.001
 
-# ── Encoder constants (gantry theta only) ─────────────────────────────────────
+# ── Encoder constants ─────────────────────────────────────────────────────────
 PULSES_PER_REV      = 24
 DEGREES_PER_COUNT   = 360.0 / (PULSES_PER_REV * 2)
 
-# ── Gantry scan parameters — smaller steps for finer resolution ───────────────
-THETA_FORWARD_STOPS = [float(x) for x in range(0, 165, 5)]
-THETA_RETURN_STOPS  = [float(x) for x in range(160, -5, -5)]
-PHI_STEP_STEPS      = 500           # smaller phi steps per sweep
+# ── Gantry scan parameters ────────────────────────────────────────────────────
+THETA_START_DEG     = 0.0
+THETA_END_DEG       = 160.0
+THETA_STEP_DEG      = 1.0       # degrees per servo move — smaller = smoother
+SERVO_STEP_DELAY    = 0.1       # seconds between each servo step — controls speed
+PHI_STEP_STEPS      = 500       # phi advance per full theta sweep
 PHI_LIMIT_STEPS     = 16000
-
-# ── Pause at each theta stop for TOF sensor reading ───────────────────────────
-THETA_PAUSE_S       = 0.3
-
-# ── Servo control parameters ──────────────────────────────────────────────────
-SERVO_SETTLE_S      = 2.0
 
 # ── Encoder debounce ──────────────────────────────────────────────────────────
 DEBOUNCE_MS         = 3.0
+
+# ── Odom publish rate ─────────────────────────────────────────────────────────
+ODOM_PUBLISH_HZ     = 20.0
 
 
 class MotorController(Node):
@@ -92,6 +80,7 @@ class MotorController(Node):
         self._enc1_count      = 0
         self._enc1_last_ms    = 0.0
         self._phi_steps_sent  = 0
+        self._current_theta   = THETA_START_DEG
 
         # ── GPIO setup ────────────────────────────────────────────────────────
         GPIO.setmode(GPIO.BCM)
@@ -104,7 +93,6 @@ class MotorController(Node):
             GPIO.setup(pin, GPIO.OUT, initial=GPIO.LOW)
         GPIO.output(M2_EN, GPIO.LOW)
 
-        # Pan-tilt pins set up but kept disabled (EN HIGH = disabled on TB6600)
         for pin in [PA_STEP, PA_DIR, PA_EN, PB_STEP, PB_DIR, PB_EN]:
             GPIO.setup(pin, GPIO.OUT, initial=GPIO.LOW)
         GPIO.output(PA_EN, GPIO.HIGH)   # disabled
@@ -118,12 +106,15 @@ class MotorController(Node):
         self.angles_pub   = self.create_publisher(Vector3,          '/pan_tilt/angles', 10)
         self.odom_raw_pub = self.create_publisher(Float32MultiArray, '/odom_raw',        10)
 
-        # Publish zero values at startup — pan-tilt stays at (0, 0)
+        # Publish angles once at startup — stays (0, 0, 0)
         self._publish_angles()
-        self._publish_odom_raw()
 
-        self.get_logger().info('Motor controller ready — pan-tilt disabled, starting scan...')
+        # Publish odom at constant rate via timer
+        self.create_timer(1.0 / ODOM_PUBLISH_HZ, self._publish_odom_raw)
 
+        self.get_logger().info('Motor controller ready — starting continuous scan...')
+
+        # Run scan in background thread
         self._scan_thread = threading.Thread(target=self.run_scan, daemon=True)
         self._scan_thread.start()
 
@@ -150,10 +141,9 @@ class MotorController(Node):
     def phi_deg(self):
         return self._phi_steps_sent / PHI_LIMIT_STEPS * 180.0
 
-    # ── Thread-safe ROS publishing ────────────────────────────────────────────
+    # ── ROS publishing ────────────────────────────────────────────────────────
 
     def _publish_angles(self):
-        # Pan-tilt always at neutral (0, 0)
         msg = Vector3()
         msg.x = 0.0
         msg.y = 0.0
@@ -163,7 +153,7 @@ class MotorController(Node):
 
     def _publish_odom_raw(self):
         msg = Float32MultiArray()
-        msg.data = [float(self.theta_deg), float(self.phi_deg)]
+        msg.data = [float(self._current_theta), float(self.phi_deg)]
         with self._pub_lock:
             self.odom_raw_pub.publish(msg)
 
@@ -177,24 +167,16 @@ class MotorController(Node):
             GPIO.output(step_pin, GPIO.LOW)
             time.sleep(delay)
 
-    # ── Servo control ─────────────────────────────────────────────────────────
-
     def _angle_to_duty(self, angle):
         angle    = max(0.0, min(SERVO_RANGE_DEG, angle))
         pulse_ms = SERVO_MIN_PULSE + (angle / SERVO_RANGE_DEG) * \
                    (SERVO_MAX_PULSE - SERVO_MIN_PULSE)
         return (pulse_ms / (1000.0 / SERVO_FREQ)) * 100.0
 
-    def move_servo_to(self, target_deg):
-        self._pwm.ChangeDutyCycle(self._angle_to_duty(target_deg))
-        time.sleep(SERVO_SETTLE_S)
-        self._publish_odom_raw()
-        self.get_logger().info(
-            f'Gantry θ → {target_deg:.1f}° '
-            f'(encoder reads {self.theta_deg:.1f}°)'
-        )
-
-    # ── Gantry phi control ────────────────────────────────────────────────────
+    def _set_servo(self, angle_deg):
+        """Set servo to angle without blocking — just sends PWM signal."""
+        self._pwm.ChangeDutyCycle(self._angle_to_duty(angle_deg))
+        self._current_theta = angle_deg
 
     def move_phi_steps(self, n_steps):
         self.get_logger().info(
@@ -203,48 +185,57 @@ class MotorController(Node):
         )
         self._step(M2_STEP, M2_DIR, n_steps, positive=True)
         self._phi_steps_sent += n_steps
-        self._publish_odom_raw()
 
     # ── Main scan loop ────────────────────────────────────────────────────────
 
     def run_scan(self):
         self.get_logger().info('Homing servo to 0°...')
-        self.move_servo_to(0.0)
-        time.sleep(0.5)
+        self._set_servo(THETA_START_DEG)
+        time.sleep(2.0)  # wait for servo to reach home
         with self._lock:
             self._enc1_count = 0
-        self.get_logger().info('Encoder zeroed. Starting scan.')
+        self.get_logger().info('Starting continuous scan...')
 
-        sweep_stops = [THETA_FORWARD_STOPS, THETA_RETURN_STOPS]
         sweep_index = 0
 
         while True:
-            stops = sweep_stops[sweep_index % 2]
+            # Forward sweep: 0° → 160° in small steps
             self.get_logger().info(
-                f'Sweep {sweep_index + 1} | '
-                f'{"→".join(f"{p}°" for p in stops)} | '
-                f'φ steps={self._phi_steps_sent}'
+                f'Sweep {sweep_index + 1} forward | φ steps={self._phi_steps_sent}'
             )
-
-            for pos in stops:
-                self.move_servo_to(pos)
-                time.sleep(THETA_PAUSE_S)  # pause for TOF reading at each stop
+            theta = THETA_START_DEG
+            while theta <= THETA_END_DEG:
+                self._set_servo(theta)
+                time.sleep(SERVO_STEP_DELAY)
+                theta += THETA_STEP_DEG
 
             if self._phi_steps_sent >= PHI_LIMIT_STEPS:
-                self.get_logger().info('Phi limit reached. Scan complete.')
+                self.get_logger().info('Scan complete.')
                 break
 
             self.move_phi_steps(PHI_STEP_STEPS)
             sweep_index += 1
 
             if self._phi_steps_sent >= PHI_LIMIT_STEPS:
-                stops = sweep_stops[sweep_index % 2]
-                self.get_logger().info('Completing final sweep...')
-                for pos in stops:
-                    self.move_servo_to(pos)
-                    time.sleep(THETA_PAUSE_S)
                 self.get_logger().info('Scan complete.')
                 break
+
+            # Return sweep: 160° → 0° in small steps
+            self.get_logger().info(
+                f'Sweep {sweep_index + 1} return | φ steps={self._phi_steps_sent}'
+            )
+            theta = THETA_END_DEG
+            while theta >= THETA_START_DEG:
+                self._set_servo(theta)
+                time.sleep(SERVO_STEP_DELAY)
+                theta -= THETA_STEP_DEG
+
+            if self._phi_steps_sent >= PHI_LIMIT_STEPS:
+                self.get_logger().info('Scan complete.')
+                break
+
+            self.move_phi_steps(PHI_STEP_STEPS)
+            sweep_index += 1
 
     # ── Cleanup ───────────────────────────────────────────────────────────────
 
