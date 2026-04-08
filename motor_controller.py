@@ -50,17 +50,15 @@ PULSES_PER_REV      = 24
 DEGREES_PER_COUNT   = 360.0 / (PULSES_PER_REV * 2)
 
 # ── Gantry scan parameters ────────────────────────────────────────────────────
-THETA_FORWARD_STOPS = [0.0, 100.0, 135.0, 160.0]   # forward sweep stop angles
-THETA_RETURN_STOPS  = [160.0, 135.0, 100.0, 0.0]   # return sweep stop angles
-PHI_STEP_STEPS      = 2909          # stepper steps per gantry sweep
-                                    # = round(16000 * 30/165)
-PHI_LIMIT_STEPS     = 16000         # total phi steps before scan ends
+THETA_FORWARD_STOPS = [float(x) for x in range(0, 161, 10)]    # 0° → 160° in 10° steps
+THETA_RETURN_STOPS  = [float(x) for x in range(160, -1, -10)]  # 160° → 0° in 10° steps
+PHI_STEP_STEPS      = 16000         # stepper steps per gantry sweep (full rotation)
 
 # ── Pan-tilt sweep parameters ─────────────────────────────────────────────────
 PT_STEP_DELAY       = 0.001         # seconds per pulse edge
 PT_STEP_DEG         = 1.8           # degrees per full step (NEMA 8, full step)
-PT_A_STEPS          = 400           # full pan range (2x)
-PT_A_INC            = 100           # Motor A steps per increment (2x)
+PT_A_STEPS          = 600           # full pan range (3x)
+PT_A_INC            = 150           # Motor A steps per increment (3x)
 PT_B_ANGLE_1        = 225.0         # first tilt angle (degrees)  — TUNE THIS
 PT_B_ANGLE_2        = 450.0         # second tilt angle (degrees) — TUNE THIS
 PT_PAUSE_S          = 0.15          # pause at each stop for TOF reading
@@ -77,7 +75,6 @@ class GantryController:
         self._lock           = threading.Lock()
         self._enc1_count     = 0
         self._enc1_last_ms   = 0.0
-        self._phi_steps_sent = 0
         self._pt_a_steps     = 0
         self._pt_b_steps     = 0
 
@@ -149,11 +146,10 @@ class GantryController:
 
     # ── Gantry phi control ────────────────────────────────────────────────────
 
-    def move_phi_steps(self, n_steps):
-        print(f"  Gantry φ: {n_steps} steps "
-              f"(total: {self._phi_steps_sent + n_steps})")
-        self._step(M2_STEP, M2_DIR, n_steps, positive=True)
-        self._phi_steps_sent += n_steps
+    def move_phi_steps(self, n_steps, forward=True):
+        direction = "forward" if forward else "reverse"
+        print(f"  Gantry φ: {n_steps} steps {direction}")
+        self._step(M2_STEP, M2_DIR, n_steps, positive=forward)
 
     # ── Pan-tilt sweep ────────────────────────────────────────────────────────
 
@@ -211,32 +207,21 @@ class GantryController:
 
         sweep_stops = [THETA_FORWARD_STOPS, THETA_RETURN_STOPS]
         sweep_index = 0
+        chain_step  = 0  # increments each servo stop; even=forward, odd=reverse
 
         while True:
             stops = sweep_stops[sweep_index % 2]
             print(f"═══ Sweep {sweep_index + 1} │ "
-                  f"{'→'.join(f'{p}°' for p in stops)} │ "
-                  f"φ steps={self._phi_steps_sent}")
+                  f"{'→'.join(f'{p}°' for p in stops)}")
 
             for pos in stops:
                 self.move_servo_to(pos)
-                self._pan_tilt_sweep(pos)
+                # self._pan_tilt_sweep(pos)  # disabled for now
+                forward = (chain_step % 2 == 0)
+                self.move_phi_steps(PHI_STEP_STEPS, forward=forward)
+                chain_step += 1
 
-            if self._phi_steps_sent >= PHI_LIMIT_STEPS:
-                print("\nPhi limit reached. Scan complete.")
-                break
-
-            self.move_phi_steps(PHI_STEP_STEPS)
             sweep_index += 1
-
-            if self._phi_steps_sent >= PHI_LIMIT_STEPS:
-                stops = sweep_stops[sweep_index % 2]
-                print(f"\nCompleting final sweep...")
-                for pos in stops:
-                    self.move_servo_to(pos)
-                    self._pan_tilt_sweep(pos)
-                print("\nScan complete.")
-                break
 
     # ── Cleanup ───────────────────────────────────────────────────────────────
 
