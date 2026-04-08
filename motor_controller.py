@@ -2,9 +2,7 @@
 """
 motor_controller.py
 ───────────────────
-Combined gantry + pan-tilt controller. Controls all four motors and
-publishes scan position to ROS 2 so point_cloud_pub.py can build the
-point cloud.
+Standalone controller for all four motors. No ROS.
 
 SCAN PATTERN:
   Gantry Motor 1 (servo, theta) sweeps 0° → 170° → 0° → ... in ~45° steps.
@@ -17,15 +15,6 @@ PAN-TILT SWEEP (at each gantry theta stop):
   At each Motor A position, Motor B (tilt) sweeps 0 → PT_B_STEPS and back.
   PT_PAUSE_S is waited at each stop so the TOF sensor can capture a reading.
 
-ROS TOPICS PUBLISHED:
-  /odom  (nav_msgs/Odometry)
-      position.{x,y,z}         = gantry scanner head 3D position (metres)
-      twist.twist.linear.x      = gantry θ (degrees)
-      twist.twist.linear.y      = gantry φ (degrees)
-      twist.twist.linear.z      = pan-tilt Motor A angle (degrees)
-      twist.twist.angular.x     = pan-tilt Motor B angle (degrees)
-  /tf   (odom → scanner_head)
-
 GPIO (BCM numbering):
   Gantry Motor 1 (servo, θ):   PWM=13
   Gantry Motor 2 (stepper, φ): STEP=23  DIR=24  EN=25
@@ -34,15 +23,9 @@ GPIO (BCM numbering):
   Pan-tilt Motor B (tilt):     STEP=12  DIR=7   EN=8
 """
 
-import rclpy
-from rclpy.node import Node
-from nav_msgs.msg import Odometry
-from geometry_msgs.msg import TransformStamped
-import tf2_ros
 import RPi.GPIO as GPIO
 import time
 import threading
-import math
 
 # ── GPIO pins — gantry ────────────────────────────────────────────────────────
 SERVO_PIN = 13
@@ -72,12 +55,11 @@ THETA_STEP_DEG      = 45.0          # stop every ~45° during sweep
 PHI_STEP_STEPS      = 2909          # stepper steps per gantry sweep
                                     # = round(16000 * 30/165)
 PHI_LIMIT_STEPS     = 16000         # total phi steps before scan ends
-PHI_DEG_PER_STEP    = 180.0 / PHI_LIMIT_STEPS  # approximate arc degrees/step
 
 # ── Pan-tilt sweep parameters ─────────────────────────────────────────────────
 PT_STEP_DELAY       = 0.001         # seconds per pulse edge
 PT_STEP_DEG         = 1.8           # degrees per full step (NEMA 8, full step)
-PT_A_STEPS          = 400           # full range of Motor A (pan) — TUNE THIS
+PT_A_STEPS          = 400           # full range of Motor A (pan)  — TUNE THIS
 PT_B_STEPS          = 400           # full range of Motor B (tilt) — TUNE THIS
 PT_A_INC            = 100           # Motor A steps per increment
 PT_B_INC            = 100           # Motor B steps per increment
@@ -92,20 +74,15 @@ SERVO_INCREMENT_DEG = 2.0
 # ── Encoder debounce ──────────────────────────────────────────────────────────
 DEBOUNCE_MS         = 3.0
 
-# ── Physical constants ────────────────────────────────────────────────────────
-ARC_RADIUS_M        = 0.30          # gantry arc radius in metres
 
-
-class GantryController(Node):
+class GantryController:
     def __init__(self):
-        super().__init__('gantry_controller')
-
         self._lock           = threading.Lock()
         self._enc1_count     = 0
         self._enc1_last_ms   = 0.0
         self._phi_steps_sent = 0
-        self._pt_a_steps     = 0     # current pan Motor A position (steps from home)
-        self._pt_b_steps     = 0     # current pan Motor B position (steps from home)
+        self._pt_a_steps     = 0
+        self._pt_b_steps     = 0
 
         # ── GPIO setup ────────────────────────────────────────────────────────
         GPIO.setmode(GPIO.BCM)
@@ -131,12 +108,6 @@ class GantryController(Node):
             GPIO.setup(pin, GPIO.IN, pull_up_down=GPIO.PUD_UP)
         GPIO.add_event_detect(ENC1_A, GPIO.BOTH, callback=self._enc1_cb)
 
-        # ── ROS publishers ────────────────────────────────────────────────────
-        self.odom_pub       = self.create_publisher(Odometry, '/odom', 10)
-        self.tf_broadcaster = tf2_ros.TransformBroadcaster(self)
-
-        self.get_logger().info('Gantry controller ready.')
-
     # ── Encoder callback ──────────────────────────────────────────────────────
 
     def _enc1_cb(self, channel):
@@ -155,50 +126,6 @@ class GantryController(Node):
     def theta_deg(self):
         with self._lock:
             return self._enc1_count * DEGREES_PER_COUNT
-
-    @property
-    def phi_deg(self):
-        return self._phi_steps_sent * PHI_DEG_PER_STEP
-
-    # ── ROS publishing ────────────────────────────────────────────────────────
-
-    def publish_pose(self, theta_g, phi_g, theta_pt, phi_pt):
-        """
-        Publish current scan position to /odom and /tf.
-          theta_g, phi_g    — gantry angles in degrees
-          theta_pt, phi_pt  — pan-tilt angles in degrees
-        """
-        now = self.get_clock().now().to_msg()
-
-        t_g = math.radians(theta_g)
-        p_g = math.radians(phi_g)
-        x = ARC_RADIUS_M * math.cos(p_g) * math.cos(t_g)
-        y = ARC_RADIUS_M * math.cos(p_g) * math.sin(t_g)
-        z = ARC_RADIUS_M * math.sin(p_g)
-
-        odom = Odometry()
-        odom.header.stamp         = now
-        odom.header.frame_id      = 'odom'
-        odom.child_frame_id       = 'scanner_head'
-        odom.pose.pose.position.x = x
-        odom.pose.pose.position.y = y
-        odom.pose.pose.position.z = z
-        odom.pose.pose.orientation.w  = 1.0
-        odom.twist.twist.linear.x  = theta_g   # gantry θ — used by point_cloud_pub
-        odom.twist.twist.linear.y  = phi_g     # gantry φ — used by point_cloud_pub
-        odom.twist.twist.linear.z  = theta_pt  # pan-tilt Motor A angle
-        odom.twist.twist.angular.x = phi_pt    # pan-tilt Motor B angle
-        self.odom_pub.publish(odom)
-
-        t = TransformStamped()
-        t.header.stamp        = now
-        t.header.frame_id     = 'odom'
-        t.child_frame_id      = 'scanner_head'
-        t.transform.translation.x = x
-        t.transform.translation.y = y
-        t.transform.translation.z = z
-        t.transform.rotation.w    = 1.0
-        self.tf_broadcaster.sendTransform(t)
 
     # ── Low-level motor helpers ───────────────────────────────────────────────
 
@@ -252,10 +179,8 @@ class GantryController(Node):
         Full 2D pan-tilt sweep at the current gantry theta position.
         Motor A steps through its range in PT_A_INC increments.
         At each A position, Motor B sweeps its full range and returns.
-        Publishes /odom at every stop and pauses for TOF reading.
+        Pauses at every stop so the TOF sensor can capture a reading.
         """
-        phi_g = self.phi_deg
-
         a_positions = list(range(0, PT_A_STEPS, PT_A_INC)) + [PT_A_STEPS]
 
         for a_target in a_positions:
@@ -264,7 +189,6 @@ class GantryController(Node):
                 self._step(PA_STEP, PA_DIR, abs(a_delta),
                            a_delta > 0, PT_STEP_DELAY)
                 self._pt_a_steps = a_target
-            theta_pt = self._pt_a_steps * PT_STEP_DEG
 
             b_positions = list(range(0, PT_B_STEPS, PT_B_INC)) + [PT_B_STEPS]
             for b_target in b_positions:
@@ -273,8 +197,6 @@ class GantryController(Node):
                     self._step(PB_STEP, PB_DIR, abs(b_delta),
                                b_delta > 0, PT_STEP_DELAY)
                     self._pt_b_steps = b_target
-                phi_pt = self._pt_b_steps * PT_STEP_DEG
-                self.publish_pose(theta_g, phi_g, theta_pt, phi_pt)
                 time.sleep(PT_PAUSE_S)
 
             # Return Motor B to home
@@ -288,8 +210,6 @@ class GantryController(Node):
             self._step(PA_STEP, PA_DIR, self._pt_a_steps,
                        False, PT_STEP_DELAY)
             self._pt_a_steps = 0
-
-        self.publish_pose(theta_g, phi_g, 0.0, 0.0)
 
     # ── Sweep position generator ──────────────────────────────────────────────
 
@@ -362,18 +282,13 @@ class GantryController(Node):
 
 
 def main():
-    rclpy.init()
     controller = GantryController()
     try:
         controller.run_scan()
-        print("Scan complete. Press Ctrl+C to exit.")
-        while True:
-            time.sleep(1)
     except KeyboardInterrupt:
         print("\nInterrupted.")
     finally:
         controller.cleanup()
-        rclpy.shutdown()
         print("GPIO cleaned up.")
 
 
