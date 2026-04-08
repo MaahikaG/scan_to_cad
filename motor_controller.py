@@ -26,6 +26,11 @@ GPIO (BCM numbering):
 import RPi.GPIO as GPIO
 import time
 import threading
+from RPLCD.gpio import CharLCD
+
+# ── GPIO pins — LCD ──────────────────────────────────────────────────────────
+LCD_RS = 26;  LCD_E = 18
+LCD_D4 = 4;   LCD_D5 = 9;  LCD_D6 = 10;  LCD_D7 = 11
 
 # ── GPIO pins — gantry ────────────────────────────────────────────────────────
 SERVO_PIN = 13
@@ -101,6 +106,24 @@ class GantryController:
         for pin in [ENC1_A, ENC1_B]:
             GPIO.setup(pin, GPIO.IN, pull_up_down=GPIO.PUD_UP)
         GPIO.add_event_detect(ENC1_A, GPIO.BOTH, callback=self._enc1_cb)
+
+        # ── LCD ───────────────────────────────────────────────────────────────
+        self._lcd = CharLCD(
+            numbering_mode=GPIO.BCM,
+            cols=16, rows=2,
+            pin_rs=LCD_RS, pin_e=LCD_E,
+            pins_data=[LCD_D4, LCD_D5, LCD_D6, LCD_D7],
+            compat_mode=True,
+        )
+        self._lcd.clear()
+
+    # ── LCD helper ───────────────────────────────────────────────────────────
+
+    def lcd_status(self, line1, line2=''):
+        self._lcd.cursor_pos = (0, 0)
+        self._lcd.write_string(line1[:16].ljust(16))
+        self._lcd.cursor_pos = (1, 0)
+        self._lcd.write_string(line2[:16].ljust(16))
 
     # ── Encoder callback ──────────────────────────────────────────────────────
 
@@ -198,20 +221,29 @@ class GantryController:
     # ── Main scan loop ────────────────────────────────────────────────────────
 
     def run_scan(self):
+        self.lcd_status('Homing servo...', 'theta -> 0.0 deg')
         print("Homing servo to 0°...")
         self.move_servo_to(0.0)
+        self.lcd_status('Servo at 0.0 deg', f'enc:{self.theta_deg:.1f}')
 
+        self.lcd_status('Moving chain...', '+16000 steps')
         print("Moving chain 16000 steps forward...")
         self.move_phi_steps(PHI_STEP_STEPS, forward=True)
+        self.lcd_status('Chain done', '+16000 steps')
 
+        self.lcd_status('Moving servo...', 'theta -> 160 deg')
         print("Moving servo to 160°...")
         self.move_servo_to(160.0)
+        self.lcd_status('Servo at 160 deg', f'enc:{self.theta_deg:.1f}')
 
+        self.lcd_status('Done.', '')
         print("Done.")
 
     # ── Cleanup ───────────────────────────────────────────────────────────────
 
     def cleanup(self):
+        self._lcd.clear()
+        self._lcd.close(clear=True)
         GPIO.remove_event_detect(ENC1_A)
         self._pwm.stop()
         del self._pwm
