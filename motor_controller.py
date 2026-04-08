@@ -231,10 +231,25 @@ class GantryController:
         self.move_servo_to(100.0)
         self.lcd_status('Servo at 100 deg', f'enc:{self.theta_deg:.1f}')
 
-        self.lcd_status('Moving chain...', '-16000 steps')
-        print("Moving chain 16000 steps reverse...")
-        self.move_phi_steps(PHI_STEP_STEPS, forward=False)
-        self.lcd_status('Chain done', '-16000 steps')
+        self.lcd_status('Moving chain...', '+3000 steps')
+        print("Moving chain 3000 steps forward...")
+        self.move_phi_steps(3000, forward=True)
+        self.lcd_status('Chain done', '+3000 steps')
+
+        self.lcd_status('Panning 360...', '')
+        print("Panning 360°...")
+        self._pan_360()
+        self.lcd_status('Pan done', '')
+
+        self.lcd_status('Moving chain...', '+3000 steps')
+        print("Moving chain 3000 steps forward...")
+        self.move_phi_steps(3000, forward=True)
+        self.lcd_status('Chain done', '+3000 steps')
+
+        self.lcd_status('Panning 360...', '')
+        print("Panning 360°...")
+        self._pan_360()
+        self.lcd_status('Pan done', '')
 
         self.lcd_status('Done.', '')
         print("Done.")
