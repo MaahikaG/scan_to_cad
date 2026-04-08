@@ -3,32 +3,27 @@
 motor_controller.py
 ───────────────────
 ROS2 node controller for all four motors.
-Motor control logic is identical to the original standalone script.
-Uses MultiThreadedExecutor and locked publishers for thread safety.
+Pan-tilt is disabled — sensor stays at neutral (0, 0) facing origin.
+Gantry steps are smaller for finer scan resolution.
 
 SCAN PATTERN:
-  Gantry Motor 1 (servo, theta) sweeps 0° → 170° → 0° → ... in ~45° steps.
-  At each ~45° stop, a full pan-tilt sweep is performed (Motor A × Motor B).
-  After a complete one-way gantry sweep, Gantry Motor 2 (stepper, phi)
-  advances by PHI_STEP_STEPS. Scan ends when phi reaches PHI_LIMIT_STEPS.
-
-PAN-TILT SWEEP (at each gantry theta stop):
-  Motor A (pan) steps through 0 → PT_A_STEPS in PT_A_INC increments.
-  At each Motor A position, Motor B (tilt) sweeps 0 → PT_B_STEPS and back.
-  PT_PAUSE_S is waited at each stop so the TOF sensor can capture a reading.
+  Gantry Motor 1 (servo, theta) sweeps 0° → 170° → 0° → ... in small steps.
+  Gantry Motor 2 (stepper, phi) advances by PHI_STEP_STEPS after each sweep.
+  Scan ends when phi reaches PHI_LIMIT_STEPS.
+  Pan-tilt stays at (0, 0) — no pan or tilt movement.
 
 GPIO (BCM numbering):
   Gantry Motor 1 (servo, θ):   PWM=13
   Gantry Motor 2 (stepper, φ): STEP=23  DIR=24  EN=25
   Encoder 1 (gantry θ):        A=5   B=6
-  Pan-tilt Motor A (pan):      STEP=16  DIR=20  EN=21
-  Pan-tilt Motor B (tilt):     STEP=12  DIR=7   EN=8
+  Pan-tilt Motor A (pan):      STEP=16  DIR=20  EN=21  (disabled)
+  Pan-tilt Motor B (tilt):     STEP=12  DIR=7   EN=8   (disabled)
 
 Topics published:
   /pan_tilt/angles  (geometry_msgs/Vector3)
-      x = α (pan)  in degrees
-      y = β (tilt) in degrees
-      z = 0 (unused)
+      x = 0.0 (pan  — fixed at neutral)
+      y = 0.0 (tilt — fixed at neutral)
+      z = 0.0
 
   /odom_raw  (std_msgs/Float32MultiArray)
       data[0] = θ (gantry theta) in degrees
@@ -55,9 +50,9 @@ SERVO_PIN = 13
 M2_STEP = 23;  M2_DIR = 24;  M2_EN = 25
 ENC1_A = 5;    ENC1_B = 6
 
-# ── GPIO pins — pan-tilt ──────────────────────────────────────────────────────
-PA_STEP = 16;  PA_DIR = 20;  PA_EN = 21    # Motor A — pan
-PB_STEP = 12;  PB_DIR = 7;   PB_EN = 8    # Motor B — tilt
+# ── GPIO pins — pan-tilt (set up but not driven) ──────────────────────────────
+PA_STEP = 16;  PA_DIR = 20;  PA_EN = 21
+PB_STEP = 12;  PB_DIR = 7;   PB_EN = 8
 
 # ── Servo constants ───────────────────────────────────────────────────────────
 SERVO_FREQ          = 50
@@ -72,20 +67,14 @@ STEP_DELAY          = 0.001
 PULSES_PER_REV      = 24
 DEGREES_PER_COUNT   = 360.0 / (PULSES_PER_REV * 2)
 
-# ── Gantry scan parameters ────────────────────────────────────────────────────
-THETA_FORWARD_STOPS = [0.0, 100.0, 135.0, 160.0]
-THETA_RETURN_STOPS  = [160.0, 135.0, 100.0, 0.0]
-PHI_STEP_STEPS      = 2909
+# ── Gantry scan parameters — smaller steps for finer resolution ───────────────
+THETA_FORWARD_STOPS = [0.0, 10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0, 90.0, 100.0, 110.0, 120.0, 130.0, 140.0, 150.0, 160.0]
+THETA_RETURN_STOPS  = [160.0, 150.0, 140.0, 130.0, 120.0, 110.0, 100.0, 90.0, 80.0, 70.0, 60.0, 50.0, 40.0, 30.0, 20.0, 10.0, 0.0]
+PHI_STEP_STEPS      = 500           # smaller phi steps per sweep
 PHI_LIMIT_STEPS     = 16000
 
-# ── Pan-tilt sweep parameters — identical to original ─────────────────────────
-PT_STEP_DELAY       = 0.001         # seconds per pulse edge
-PT_STEP_DEG         = 1.8           # degrees per full step (NEMA 8, full step)
-PT_A_STEPS          = 400           # full pan range
-PT_A_INC            = 100           # Motor A steps per increment
-PT_B_ANGLE_1        = 225.0         # first tilt angle (degrees)
-PT_B_ANGLE_2        = 450.0         # second tilt angle (degrees)
-PT_PAUSE_S          = 0.15          # pause at each stop for TOF reading
+# ── Pause at each theta stop for TOF sensor reading ───────────────────────────
+THETA_PAUSE_S       = 0.3
 
 # ── Servo control parameters ──────────────────────────────────────────────────
 SERVO_SETTLE_S      = 2.0
@@ -103,10 +92,8 @@ class MotorController(Node):
         self._enc1_count      = 0
         self._enc1_last_ms    = 0.0
         self._phi_steps_sent  = 0
-        self._pt_a_steps      = 0
-        self._pt_b_steps      = 0
 
-        # ── GPIO setup — identical to original ───────────────────────────────
+        # ── GPIO setup ────────────────────────────────────────────────────────
         GPIO.setmode(GPIO.BCM)
 
         GPIO.setup(SERVO_PIN, GPIO.OUT)
@@ -117,10 +104,11 @@ class MotorController(Node):
             GPIO.setup(pin, GPIO.OUT, initial=GPIO.LOW)
         GPIO.output(M2_EN, GPIO.LOW)
 
+        # Pan-tilt pins set up but kept disabled (EN HIGH = disabled on TB6600)
         for pin in [PA_STEP, PA_DIR, PA_EN, PB_STEP, PB_DIR, PB_EN]:
             GPIO.setup(pin, GPIO.OUT, initial=GPIO.LOW)
-        GPIO.output(PA_EN, GPIO.LOW)
-        GPIO.output(PB_EN, GPIO.LOW)
+        GPIO.output(PA_EN, GPIO.HIGH)   # disabled
+        GPIO.output(PB_EN, GPIO.HIGH)   # disabled
 
         for pin in [ENC1_A, ENC1_B]:
             GPIO.setup(pin, GPIO.IN, pull_up_down=GPIO.PUD_UP)
@@ -130,17 +118,16 @@ class MotorController(Node):
         self.angles_pub   = self.create_publisher(Vector3,          '/pan_tilt/angles', 10)
         self.odom_raw_pub = self.create_publisher(Float32MultiArray, '/odom_raw',        10)
 
-        # Publish zero values at startup
+        # Publish zero values at startup — pan-tilt stays at (0, 0)
         self._publish_angles()
         self._publish_odom_raw()
 
-        self.get_logger().info('Motor controller ready — starting scan...')
+        self.get_logger().info('Motor controller ready — pan-tilt disabled, starting scan...')
 
-        # Run scan in background thread so ROS executor can still spin
         self._scan_thread = threading.Thread(target=self.run_scan, daemon=True)
         self._scan_thread.start()
 
-    # ── Encoder callback — identical to original ──────────────────────────────
+    # ── Encoder callback ──────────────────────────────────────────────────────
 
     def _enc1_cb(self, channel):
         now = time.monotonic() * 1000.0
@@ -152,7 +139,7 @@ class MotorController(Node):
         with self._lock:
             self._enc1_count += 1 if a != b else -1
 
-    # ── Position properties — identical to original ───────────────────────────
+    # ── Position properties ───────────────────────────────────────────────────
 
     @property
     def theta_deg(self):
@@ -166,9 +153,10 @@ class MotorController(Node):
     # ── Thread-safe ROS publishing ────────────────────────────────────────────
 
     def _publish_angles(self):
+        # Pan-tilt always at neutral (0, 0)
         msg = Vector3()
-        msg.x = self._pt_a_steps * PT_STEP_DEG
-        msg.y = self._pt_b_steps * PT_STEP_DEG
+        msg.x = 0.0
+        msg.y = 0.0
         msg.z = 0.0
         with self._pub_lock:
             self.angles_pub.publish(msg)
@@ -179,7 +167,7 @@ class MotorController(Node):
         with self._pub_lock:
             self.odom_raw_pub.publish(msg)
 
-    # ── Low-level motor helpers — identical to original ───────────────────────
+    # ── Low-level motor helpers ───────────────────────────────────────────────
 
     def _step(self, step_pin, dir_pin, n_steps, positive, delay=STEP_DELAY):
         GPIO.output(dir_pin, GPIO.HIGH if positive else GPIO.LOW)
@@ -189,7 +177,7 @@ class MotorController(Node):
             GPIO.output(step_pin, GPIO.LOW)
             time.sleep(delay)
 
-    # ── Servo control — identical to original ─────────────────────────────────
+    # ── Servo control ─────────────────────────────────────────────────────────
 
     def _angle_to_duty(self, angle):
         angle    = max(0.0, min(SERVO_RANGE_DEG, angle))
@@ -206,7 +194,7 @@ class MotorController(Node):
             f'(encoder reads {self.theta_deg:.1f}°)'
         )
 
-    # ── Gantry phi control — identical to original ────────────────────────────
+    # ── Gantry phi control ────────────────────────────────────────────────────
 
     def move_phi_steps(self, n_steps):
         self.get_logger().info(
@@ -217,54 +205,7 @@ class MotorController(Node):
         self._phi_steps_sent += n_steps
         self._publish_odom_raw()
 
-    # ── Pan-tilt sweep — identical to original ────────────────────────────────
-
-    def _pan_360(self):
-        """Pan Motor A a full 360° in increments, pausing at each stop, then return."""
-        a_positions = list(range(0, PT_A_STEPS, PT_A_INC)) + [PT_A_STEPS]
-        for a_target in a_positions:
-            a_delta = a_target - self._pt_a_steps
-            if a_delta != 0:
-                self._step(PA_STEP, PA_DIR, abs(a_delta),
-                           a_delta > 0, PT_STEP_DELAY)
-                self._pt_a_steps = a_target
-                self._publish_angles()
-            time.sleep(PT_PAUSE_S)
-        # Return Motor A to home
-        if self._pt_a_steps > 0:
-            self._step(PA_STEP, PA_DIR, self._pt_a_steps,
-                       False, PT_STEP_DELAY)
-            self._pt_a_steps = 0
-            self._publish_angles()
-
-    def _move_tilt_to(self, angle_deg):
-        """Move Motor B to the given tilt angle in degrees."""
-        target_steps = int(round(angle_deg / PT_STEP_DEG))
-        delta = target_steps - self._pt_b_steps
-        if delta != 0:
-            self._step(PB_STEP, PB_DIR, abs(delta),
-                       delta > 0, PT_STEP_DELAY)
-            self._pt_b_steps = target_steps
-            self._publish_angles()
-
-    def _pan_tilt_sweep(self, theta_g):
-        """
-        At the current gantry theta stop:
-          1. Move tilt to PT_B_ANGLE_1, pan full 360°.
-          2. Move tilt to PT_B_ANGLE_2, pan full 360°.
-          3. Return tilt to home (0°).
-        """
-        self._move_tilt_to(PT_B_ANGLE_1)
-        self.get_logger().info(f'Tilt → {PT_B_ANGLE_1}°, panning 360°')
-        self._pan_360()
-
-        self._move_tilt_to(PT_B_ANGLE_2)
-        self.get_logger().info(f'Tilt → {PT_B_ANGLE_2}°, panning 360°')
-        self._pan_360()
-
-        self._move_tilt_to(0.0)
-
-    # ── Main scan loop — identical to original ────────────────────────────────
+    # ── Main scan loop ────────────────────────────────────────────────────────
 
     def run_scan(self):
         self.get_logger().info('Homing servo to 0°...')
@@ -287,7 +228,7 @@ class MotorController(Node):
 
             for pos in stops:
                 self.move_servo_to(pos)
-                self._pan_tilt_sweep(pos)
+                time.sleep(THETA_PAUSE_S)  # pause for TOF reading at each stop
 
             if self._phi_steps_sent >= PHI_LIMIT_STEPS:
                 self.get_logger().info('Phi limit reached. Scan complete.')
@@ -301,11 +242,11 @@ class MotorController(Node):
                 self.get_logger().info('Completing final sweep...')
                 for pos in stops:
                     self.move_servo_to(pos)
-                    self._pan_tilt_sweep(pos)
+                    time.sleep(THETA_PAUSE_S)
                 self.get_logger().info('Scan complete.')
                 break
 
-    # ── Cleanup — identical to original ──────────────────────────────────────
+    # ── Cleanup ───────────────────────────────────────────────────────────────
 
     def destroy_node(self):
         GPIO.remove_event_detect(ENC1_A)
