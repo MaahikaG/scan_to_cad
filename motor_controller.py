@@ -50,8 +50,8 @@ PULSES_PER_REV      = 24
 DEGREES_PER_COUNT   = 360.0 / (PULSES_PER_REV * 2)
 
 # ── Gantry scan parameters ────────────────────────────────────────────────────
-THETA_FORWARD_STOPS = [0.0, 100.0, 135.0, 170.0]   # forward sweep stop angles
-THETA_RETURN_STOPS  = [170.0, 135.0, 100.0, 0.0]   # return sweep stop angles
+THETA_FORWARD_STOPS = [0.0, 100.0, 135.0, 160.0]   # forward sweep stop angles
+THETA_RETURN_STOPS  = [160.0, 135.0, 100.0, 0.0]   # return sweep stop angles
 PHI_STEP_STEPS      = 2909          # stepper steps per gantry sweep
                                     # = round(16000 * 30/165)
 PHI_LIMIT_STEPS     = 16000         # total phi steps before scan ends
@@ -59,10 +59,10 @@ PHI_LIMIT_STEPS     = 16000         # total phi steps before scan ends
 # ── Pan-tilt sweep parameters ─────────────────────────────────────────────────
 PT_STEP_DELAY       = 0.001         # seconds per pulse edge
 PT_STEP_DEG         = 1.8           # degrees per full step (NEMA 8, full step)
-PT_A_STEPS          = 4000          # full pan range (20x original)
-PT_A_INC            = 1000          # Motor A steps per increment (20x original)
-PT_B_ANGLE_1        = 2025.0        # first tilt angle (degrees)  — TUNE THIS
-PT_B_ANGLE_2        = 4050.0        # second tilt angle (degrees) — TUNE THIS
+PT_A_STEPS          = 200           # full 360° pan (360 / 1.8 = 200 steps)
+PT_A_INC            = 50            # Motor A steps per increment (stop every 90°)
+PT_B_ANGLE_1        = 45.0          # first tilt angle (degrees)  — TUNE THIS
+PT_B_ANGLE_2        = 90.0          # second tilt angle (degrees) — TUNE THIS
 PT_PAUSE_S          = 0.15          # pause at each stop for TOF reading
 
 # ── Servo control parameters ──────────────────────────────────────────────────
