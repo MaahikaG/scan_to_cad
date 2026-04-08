@@ -1,118 +1,294 @@
+#!/home/mie_g28/venv/bin/python3
 """
 motor_controller.py
 ───────────────────
-Controls the two gantry stepper motors via A4988 drivers.
+ROS2 node controller for all four motors.
 
-COORDINATE SYSTEM:
-  Motor 1 → θ (theta): rotation of the entire semicircular arm around the Z axis.
-             Positive θ = counterclockwise when viewed from above.
-             Negative θ = clockwise when viewed from above.
+SCAN PATTERN:
+  Gantry Motor 1 (servo, theta) sweeps 0° → 170° → 0° → ... in ~45° steps.
+  At each ~45° stop, a full pan-tilt sweep is performed (Motor A × Motor B).
+  After a complete one-way gantry sweep, Gantry Motor 2 (stepper, phi)
+  advances by PHI_STEP_STEPS. Scan ends when phi reaches PHI_LIMIT_STEPS.
 
-  Motor 2 → φ (phi): angular position of the pan-tilt head along the
-             semicircle arc. The diameter of the semicircle lies flat in
-             the XY plane (perpendicular to Z), with the arc bulging upward.
-             φ = 0°   → home end of the diameter (horizontal)
-             φ = 90°  → top of the arc (directly above center, along +Z)
-             φ = 180° → far end of the diameter (horizontal, opposite side)
-
-Topics subscribed:
-  /motor/theta_steps  (std_msgs/Float32)
-      Steps to move Motor 1 (Z rotation).
-      Positive = counterclockwise from above, negative = clockwise.
-
-  /motor/phi_steps    (std_msgs/Float32)
-      Steps to move Motor 2 (arc position).
-      Positive = move from φ=0° toward φ=180° (through the top).
-      Negative = move back toward φ=0°.
+PAN-TILT SWEEP (at each gantry theta stop):
+  Motor A (pan) steps through 0 → PT_A_STEPS in PT_A_INC increments.
+  At each Motor A position, Motor B (tilt) sweeps 0 → PT_B_STEPS and back.
+  PT_PAUSE_S is waited at each stop so the TOF sensor can capture a reading.
 
 GPIO (BCM numbering):
-  Motor 1 (theta):  STEP=17  DIR=27  EN=22
-  Motor 2 (phi):    STEP=23  DIR=24  EN=25
+  Gantry Motor 1 (servo, θ):   PWM=13
+  Gantry Motor 2 (stepper, φ): STEP=23  DIR=24  EN=25
+  Encoder 1 (gantry θ):        A=5   B=6
+  Pan-tilt Motor A (pan):      STEP=16  DIR=20  EN=21
+  Pan-tilt Motor B (tilt):     STEP=12  DIR=7   EN=8
+
+Topics published:
+  /pan_tilt/angles  (geometry_msgs/Vector3)
+      x = α (pan)  in degrees
+      y = β (tilt) in degrees
+      z = 0 (unused)
 """
 
 import rclpy
 from rclpy.node import Node
-from std_msgs.msg import Float32
+from geometry_msgs.msg import Vector3
+
 try:
     import RPi.GPIO as GPIO
-except RuntimeError:
-    from rpi_lgpio import GPIO
+except ImportError:
+    from unittest.mock import MagicMock
+    GPIO = MagicMock()
+
 import time
+import threading
 
-# ── GPIO pin assignments (BCM numbering) ──────────────────────────────────────
-M1_STEP = 17;  M1_DIR = 27;  M1_EN = 22    # Motor 1 — theta (Z rotation)
-M2_STEP = 23;  M2_DIR = 24;  M2_EN = 25    # Motor 2 — phi   (arc position)
+# ── GPIO pins — gantry ────────────────────────────────────────────────────────
+SERVO_PIN = 13
+M2_STEP = 23;  M2_DIR = 24;  M2_EN = 25
+ENC1_A = 5;    ENC1_B = 6
 
-STEP_DELAY = 0.001      # seconds per pulse edge → period = 2×STEP_DELAY
-                        # 0.001 s → 500 steps/sec. Reduce to go faster.
+# ── GPIO pins — pan-tilt ──────────────────────────────────────────────────────
+PA_STEP = 16;  PA_DIR = 20;  PA_EN = 21    # Motor A — pan
+PB_STEP = 12;  PB_DIR = 7;   PB_EN = 8    # Motor B — tilt
+
+# ── Servo constants ───────────────────────────────────────────────────────────
+SERVO_FREQ          = 50
+SERVO_MIN_PULSE     = 0.5
+SERVO_MAX_PULSE     = 2.5
+SERVO_RANGE_DEG     = 300.0
+
+# ── Gantry stepper constants ──────────────────────────────────────────────────
+STEP_DELAY          = 0.001
+
+# ── Encoder constants (gantry theta only) ────────────────────────────────────
+PULSES_PER_REV      = 24
+DEGREES_PER_COUNT   = 360.0 / (PULSES_PER_REV * 2)
+
+# ── Gantry scan parameters ────────────────────────────────────────────────────
+THETA_FORWARD_STOPS = [0.0, 100.0, 135.0, 160.0]
+THETA_RETURN_STOPS  = [160.0, 135.0, 100.0, 0.0]
+PHI_STEP_STEPS      = 2909
+PHI_LIMIT_STEPS     = 16000
+
+# ── Pan-tilt sweep parameters ─────────────────────────────────────────────────
+PT_STEP_DELAY       = 0.001
+PT_STEP_DEG         = 1.8
+PT_A_STEPS          = 400
+PT_A_INC            = 100
+PT_B_ANGLE_1        = 225.0
+PT_B_ANGLE_2        = 450.0
+PT_PAUSE_S          = 0.15
+
+# ── Servo control parameters ──────────────────────────────────────────────────
+SERVO_SETTLE_S      = 2.0
+
+# ── Encoder debounce ──────────────────────────────────────────────────────────
+DEBOUNCE_MS         = 3.0
 
 
-class MotorControllerNode(Node):
+class MotorController(Node):
     def __init__(self):
         super().__init__('motor_controller')
 
+        self._lock            = threading.Lock()
+        self._enc1_count      = 0
+        self._enc1_last_ms    = 0.0
+        self._phi_steps_sent  = 0
+        self._pt_a_steps      = 0
+        self._pt_b_steps      = 0
+
         # ── GPIO setup ────────────────────────────────────────────────────────
         GPIO.setmode(GPIO.BCM)
-        for pin in [M1_STEP, M1_DIR, M1_EN, M2_STEP, M2_DIR, M2_EN]:
-            GPIO.setup(pin, GPIO.OUT, initial=GPIO.LOW)
 
-        # Enable both drivers (EN is active LOW on A4988)
-        GPIO.output(M1_EN, GPIO.LOW)
+        GPIO.setup(SERVO_PIN, GPIO.OUT)
+        self._pwm = GPIO.PWM(SERVO_PIN, SERVO_FREQ)
+        self._pwm.start(0)
+
+        for pin in [M2_STEP, M2_DIR, M2_EN]:
+            GPIO.setup(pin, GPIO.OUT, initial=GPIO.LOW)
         GPIO.output(M2_EN, GPIO.LOW)
 
-        # ── Subscriptions ─────────────────────────────────────────────────────
-        self.create_subscription(
-            Float32, '/motor/theta_steps', self.theta_cb, 10
-        )
-        self.create_subscription(
-            Float32, '/motor/phi_steps', self.phi_cb, 10
-        )
+        for pin in [PA_STEP, PA_DIR, PA_EN, PB_STEP, PB_DIR, PB_EN]:
+            GPIO.setup(pin, GPIO.OUT, initial=GPIO.LOW)
+        GPIO.output(PA_EN, GPIO.LOW)
+        GPIO.output(PB_EN, GPIO.LOW)
 
-        self.get_logger().info(
-            'Motor controller ready | '
-            '/motor/theta_steps → Motor 1 (Z rotation) | '
-            '/motor/phi_steps   → Motor 2 (arc position)'
-        )
+        for pin in [ENC1_A, ENC1_B]:
+            GPIO.setup(pin, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+        GPIO.add_event_detect(ENC1_A, GPIO.BOTH, callback=self._enc1_cb)
 
-    # ── Internal helpers ──────────────────────────────────────────────────────
+        # ── ROS publisher ─────────────────────────────────────────────────────
+        self.angles_pub = self.create_publisher(Vector3, '/pan_tilt/angles', 10)
 
-    def _move(self, step_pin: int, dir_pin: int, steps: int):
-        """
-        Send `steps` pulses to one motor.
-        Positive steps → DIR HIGH (counterclockwise / toward φ=180°).
-        Negative steps → DIR LOW  (clockwise / toward φ=0°).
-        """
-        if steps == 0:
+        # Publish zero angles at startup
+        self._publish_angles()
+
+        self.get_logger().info('Motor controller ready — starting scan...')
+
+        # Run scan in background thread so ROS can still spin
+        self._scan_thread = threading.Thread(target=self.run_scan, daemon=True)
+        self._scan_thread.start()
+
+    # ── Encoder callback ──────────────────────────────────────────────────────
+
+    def _enc1_cb(self, channel):
+        now = time.monotonic() * 1000.0
+        if now - self._enc1_last_ms < DEBOUNCE_MS:
             return
-        GPIO.output(dir_pin, GPIO.HIGH if steps > 0 else GPIO.LOW)
-        for _ in range(abs(steps)):
+        self._enc1_last_ms = now
+        a = GPIO.input(ENC1_A)
+        b = GPIO.input(ENC1_B)
+        with self._lock:
+            self._enc1_count += 1 if a != b else -1
+
+    # ── Position properties ───────────────────────────────────────────────────
+
+    @property
+    def theta_deg(self):
+        with self._lock:
+            return self._enc1_count * DEGREES_PER_COUNT
+
+    # ── ROS publishing ────────────────────────────────────────────────────────
+
+    def _publish_angles(self):
+        msg = Vector3()
+        msg.x = self._pt_a_steps * PT_STEP_DEG   # alpha in degrees
+        msg.y = self._pt_b_steps * PT_STEP_DEG   # beta in degrees
+        msg.z = 0.0
+        self.angles_pub.publish(msg)
+
+    # ── Low-level motor helpers ───────────────────────────────────────────────
+
+    def _step(self, step_pin, dir_pin, n_steps, positive, delay=STEP_DELAY):
+        GPIO.output(dir_pin, GPIO.HIGH if positive else GPIO.LOW)
+        for _ in range(n_steps):
             GPIO.output(step_pin, GPIO.HIGH)
-            time.sleep(STEP_DELAY)
+            time.sleep(delay)
             GPIO.output(step_pin, GPIO.LOW)
-            time.sleep(STEP_DELAY)
+            time.sleep(delay)
 
-    # ── ROS callbacks ─────────────────────────────────────────────────────────
+    # ── Servo control ─────────────────────────────────────────────────────────
 
-    def theta_cb(self, msg: Float32):
-        """Move Motor 1 — Z-axis rotation (theta)."""
-        self._move(M1_STEP, M1_DIR, int(msg.data))
+    def _angle_to_duty(self, angle):
+        angle    = max(0.0, min(SERVO_RANGE_DEG, angle))
+        pulse_ms = SERVO_MIN_PULSE + (angle / SERVO_RANGE_DEG) * \
+                   (SERVO_MAX_PULSE - SERVO_MIN_PULSE)
+        return (pulse_ms / (1000.0 / SERVO_FREQ)) * 100.0
 
-    def phi_cb(self, msg: Float32):
-        """Move Motor 2 — arc position along semicircle (phi)."""
-        self._move(M2_STEP, M2_DIR, int(msg.data))
+    def move_servo_to(self, target_deg):
+        self._pwm.ChangeDutyCycle(self._angle_to_duty(target_deg))
+        time.sleep(SERVO_SETTLE_S)
+        self.get_logger().info(
+            f'Gantry θ → {target_deg:.1f}° '
+            f'(encoder reads {self.theta_deg:.1f}°)'
+        )
+
+    # ── Gantry phi control ────────────────────────────────────────────────────
+
+    def move_phi_steps(self, n_steps):
+        self.get_logger().info(
+            f'Gantry φ: {n_steps} steps '
+            f'(total: {self._phi_steps_sent + n_steps})'
+        )
+        self._step(M2_STEP, M2_DIR, n_steps, positive=True)
+        self._phi_steps_sent += n_steps
+
+    # ── Pan-tilt sweep ────────────────────────────────────────────────────────
+
+    def _pan_360(self):
+        a_positions = list(range(0, PT_A_STEPS, PT_A_INC)) + [PT_A_STEPS]
+        for a_target in a_positions:
+            a_delta = a_target - self._pt_a_steps
+            if a_delta != 0:
+                self._step(PA_STEP, PA_DIR, abs(a_delta),
+                           a_delta > 0, PT_STEP_DELAY)
+                self._pt_a_steps = a_target
+                self._publish_angles()
+            time.sleep(PT_PAUSE_S)
+        # Return Motor A to home
+        if self._pt_a_steps > 0:
+            self._step(PA_STEP, PA_DIR, self._pt_a_steps,
+                       False, PT_STEP_DELAY)
+            self._pt_a_steps = 0
+            self._publish_angles()
+
+    def _move_tilt_to(self, angle_deg):
+        target_steps = int(round(angle_deg / PT_STEP_DEG))
+        delta = target_steps - self._pt_b_steps
+        if delta != 0:
+            self._step(PB_STEP, PB_DIR, abs(delta),
+                       delta > 0, PT_STEP_DELAY)
+            self._pt_b_steps = target_steps
+            self._publish_angles()
+
+    def _pan_tilt_sweep(self, theta_g):
+        self._move_tilt_to(PT_B_ANGLE_1)
+        self.get_logger().info(f'Tilt → {PT_B_ANGLE_1}°, panning 360°')
+        self._pan_360()
+
+        self._move_tilt_to(PT_B_ANGLE_2)
+        self.get_logger().info(f'Tilt → {PT_B_ANGLE_2}°, panning 360°')
+        self._pan_360()
+
+        self._move_tilt_to(0.0)
+
+    # ── Main scan loop ────────────────────────────────────────────────────────
+
+    def run_scan(self):
+        self.get_logger().info('Homing servo to 0°...')
+        self.move_servo_to(0.0)
+        time.sleep(0.5)
+        with self._lock:
+            self._enc1_count = 0
+        self.get_logger().info('Encoder zeroed. Starting scan.')
+
+        sweep_stops = [THETA_FORWARD_STOPS, THETA_RETURN_STOPS]
+        sweep_index = 0
+
+        while True:
+            stops = sweep_stops[sweep_index % 2]
+            self.get_logger().info(
+                f'Sweep {sweep_index + 1} | '
+                f'{"→".join(f"{p}°" for p in stops)} | '
+                f'φ steps={self._phi_steps_sent}'
+            )
+
+            for pos in stops:
+                self.move_servo_to(pos)
+                self._pan_tilt_sweep(pos)
+
+            if self._phi_steps_sent >= PHI_LIMIT_STEPS:
+                self.get_logger().info('Phi limit reached. Scan complete.')
+                break
+
+            self.move_phi_steps(PHI_STEP_STEPS)
+            sweep_index += 1
+
+            if self._phi_steps_sent >= PHI_LIMIT_STEPS:
+                stops = sweep_stops[sweep_index % 2]
+                self.get_logger().info('Completing final sweep...')
+                for pos in stops:
+                    self.move_servo_to(pos)
+                    self._pan_tilt_sweep(pos)
+                self.get_logger().info('Scan complete.')
+                break
 
     # ── Cleanup ───────────────────────────────────────────────────────────────
 
     def destroy_node(self):
-        GPIO.output(M1_EN, GPIO.HIGH)
+        GPIO.remove_event_detect(ENC1_A)
+        self._pwm.stop()
+        del self._pwm
         GPIO.output(M2_EN, GPIO.HIGH)
+        GPIO.output(PA_EN, GPIO.HIGH)
+        GPIO.output(PB_EN, GPIO.HIGH)
         GPIO.cleanup()
         super().destroy_node()
 
 
 def main(args=None):
     rclpy.init(args=args)
-    node = MotorControllerNode()
+    node = MotorController()
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:
@@ -120,3 +296,7 @@ def main(args=None):
     finally:
         node.destroy_node()
         rclpy.shutdown()
+
+
+if __name__ == '__main__':
+    main()

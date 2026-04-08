@@ -27,12 +27,12 @@ CONTRAST:
   potentiometer on pin 3 slowly until characters appear.
 
 DISPLAY LAYOUT (16x2):
-  Row 0:  T:000.0 P:000.0    (theta and phi in degrees)
-  Row 1:  TOF:  0.000 m      (TOF distance)
+  Row 0:  T:000.0 P:000.0    (gantry theta and phi in degrees from /odom)
+  Row 1:  a:000.0 b:000.0    (pan alpha and tilt beta in degrees from /pan_tilt/angles)
 
 Topics subscribed:
-  /odom       (nav_msgs/Odometry)  — twist.linear.x=θ, twist.linear.y=φ
-  /tof/range  (sensor_msgs/Range)  — distance in metres
+  /odom              (nav_msgs/Odometry)       — twist.linear.x=θ, twist.linear.y=φ
+  /pan_tilt/angles   (geometry_msgs/Vector3)   — x=α (pan), y=β (tilt)
 
 Install library:
   pip install RPLCD
@@ -41,12 +41,13 @@ Install library:
 import rclpy
 from rclpy.node import Node
 from nav_msgs.msg import Odometry
-from sensor_msgs.msg import Range
+from geometry_msgs.msg import Vector3
 from RPLCD.gpio import CharLCD
 try:
     import RPi.GPIO as GPIO
-except RuntimeError:
-    from rpi_lgpio import GPIO
+except ImportError:
+    from unittest.mock import MagicMock
+    GPIO = MagicMock()
 
 # ── GPIO pin assignments (BCM numbering) ──────────────────────────────────────
 LCD_RS = 26
@@ -65,7 +66,6 @@ class LCDDisplay(Node):
         super().__init__('lcd_display')
 
         # ── Initialise LCD in 4-bit parallel mode ─────────────────────────────
-        # RPLCD handles all the HD44780 initialisation sequence automatically.
         self.lcd = CharLCD(
             numbering_mode=GPIO.BCM,
             cols=LCD_COLS,
@@ -78,13 +78,14 @@ class LCDDisplay(Node):
         self.lcd.clear()
 
         # ── Cached display values ─────────────────────────────────────────────
-        self.theta_deg = 0.0
-        self.phi_deg   = 0.0
-        self.dist      = 0.0
+        self.theta_deg = 0.0   # gantry θ from /odom
+        self.phi_deg   = 0.0   # gantry φ from /odom
+        self.alpha_deg = 0.0   # pan α from /pan_tilt/angles
+        self.beta_deg  = 0.0   # tilt β from /pan_tilt/angles
 
         # ── Subscriptions ─────────────────────────────────────────────────────
-        self.create_subscription(Odometry, '/odom',      self.odom_cb,  10)
-        self.create_subscription(Range,    '/tof/range', self.range_cb, 10)
+        self.create_subscription(Odometry, '/odom',            self.odom_cb,      10)
+        self.create_subscription(Vector3,  '/pan_tilt/angles', self.pan_tilt_cb,  10)
 
         # Refresh at 2 Hz — LCD writes are slow, going faster causes glitches
         self.create_timer(0.5, self.update_display)
@@ -94,18 +95,20 @@ class LCDDisplay(Node):
     # ── ROS callbacks ─────────────────────────────────────────────────────────
 
     def odom_cb(self, msg: Odometry):
-        # θ and φ are packed into twist.linear by odom_tf_pubs.py
         self.theta_deg = msg.twist.twist.linear.x
         self.phi_deg   = msg.twist.twist.linear.y
 
-    def range_cb(self, msg: Range):
-        self.dist = msg.range
+    def pan_tilt_cb(self, msg: Vector3):
+        self.alpha_deg = msg.x
+        self.beta_deg  = msg.y
 
     # ── Display update ────────────────────────────────────────────────────────
 
     def update_display(self):
+        # Row 0: gantry θ and φ
         line1 = f'T:{self.theta_deg:6.1f} P:{self.phi_deg:6.1f}'
-        line2 = f'TOF: {self.dist:6.3f} m'
+        # Row 1: pan α and tilt β
+        line2 = f'a:{self.alpha_deg:6.1f} b:{self.beta_deg:6.1f}'
 
         self.lcd.cursor_pos = (0, 0)
         self.lcd.write_string(line1[:LCD_COLS].ljust(LCD_COLS))
