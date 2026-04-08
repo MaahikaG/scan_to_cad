@@ -76,8 +76,8 @@ PHI_STEP_STEPS      = 2909
 PHI_LIMIT_STEPS     = 16000
 
 # ── Pan-tilt sweep parameters ─────────────────────────────────────────────────
-PT_STEP_DELAY       = 0.001
-PT_STEP_DEG         = 1.8
+PT_STEP_DELAY = 0.005
+PT_STEP_DEG = 1.8 / 8
 PT_A_STEPS          = 400
 PT_A_INC            = 100
 PT_B_ANGLE_1        = 225.0
