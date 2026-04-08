@@ -231,10 +231,10 @@ class GantryController:
         self.move_phi_steps(PHI_STEP_STEPS, forward=True)
         self.lcd_status('Chain done', '+16000 steps')
 
-        self.lcd_status('Moving servo...', 'theta -> 20 deg')
-        print("Moving servo to 20°...")
-        self.move_servo_to(20.0)
-        self.lcd_status('Servo at 20 deg', f'enc:{self.theta_deg:.1f}')
+        self.lcd_status('Moving servo...', 'theta -> 40 deg')
+        print("Moving servo to 40°...")
+        self.move_servo_to(40.0)
+        self.lcd_status('Servo at 40 deg', f'enc:{self.theta_deg:.1f}')
 
         self.lcd_status('Done.', '')
         print("Done.")
