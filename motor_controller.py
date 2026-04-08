@@ -97,11 +97,11 @@ class GantryController:
             GPIO.setup(pin, GPIO.OUT, initial=GPIO.LOW)
         GPIO.output(M2_EN, GPIO.LOW)
 
-        # Pan-tilt steppers (Motors A and B)
-        for pin in [PA_STEP, PA_DIR, PA_EN, PB_STEP, PB_DIR, PB_EN]:
-            GPIO.setup(pin, GPIO.OUT, initial=GPIO.LOW)
-        GPIO.output(PA_EN, GPIO.LOW)
-        GPIO.output(PB_EN, GPIO.LOW)
+        # Pan-tilt steppers (Motors A and B) — disabled for now
+        # for pin in [PA_STEP, PA_DIR, PA_EN, PB_STEP, PB_DIR, PB_EN]:
+        #     GPIO.setup(pin, GPIO.OUT, initial=GPIO.LOW)
+        # GPIO.output(PA_EN, GPIO.LOW)
+        # GPIO.output(PB_EN, GPIO.LOW)
 
         # Encoder 1 (gantry theta)
         for pin in [ENC1_A, ENC1_B]:
@@ -247,8 +247,7 @@ class GantryController:
 
             for pos in positions:
                 self.move_servo_to(pos)
-                print(f"  ── Pan-tilt sweep at gantry θ={pos}°")
-                self._pan_tilt_sweep(pos)
+                # self._pan_tilt_sweep(pos)  # disabled for now
 
             current_pos = end
 
@@ -265,8 +264,7 @@ class GantryController:
                 print(f"\nCompleting final sweep to {end:.1f}°...")
                 for pos in positions:
                     self.move_servo_to(pos)
-                    print(f"  ── Pan-tilt sweep at gantry θ={pos}°")
-                    self._pan_tilt_sweep(pos)
+                    # self._pan_tilt_sweep(pos)  # disabled for now
                 print("\nScan complete.")
                 break
 
@@ -277,8 +275,8 @@ class GantryController:
         self._pwm.stop()
         del self._pwm
         GPIO.output(M2_EN, GPIO.HIGH)
-        GPIO.output(PA_EN, GPIO.HIGH)
-        GPIO.output(PB_EN, GPIO.HIGH)
+        # GPIO.output(PA_EN, GPIO.HIGH)  # disabled for now
+        # GPIO.output(PB_EN, GPIO.HIGH)  # disabled for now
         GPIO.cleanup()
 
 
