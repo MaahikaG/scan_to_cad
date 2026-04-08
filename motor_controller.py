@@ -62,8 +62,8 @@ PHI_STEP_STEPS      = 16000         # stepper steps per gantry sweep (full rotat
 # ── Pan-tilt sweep parameters ─────────────────────────────────────────────────
 PT_STEP_DELAY       = 0.001         # seconds per pulse edge
 PT_STEP_DEG         = 1.8           # degrees per full step (NEMA 8, full step)
-PT_A_STEPS          = 600           # full pan range (3x)
-PT_A_INC            = 150           # Motor A steps per increment (3x)
+PT_A_STEPS          = 2400          # full pan range (12x original)
+PT_A_INC            = 600           # Motor A steps per increment (12x original)
 PT_B_ANGLE_1        = 225.0         # first tilt angle (degrees)  — TUNE THIS
 PT_B_ANGLE_2        = 450.0         # second tilt angle (degrees) — TUNE THIS
 PT_PAUSE_S          = 0.15          # pause at each stop for TOF reading
@@ -225,11 +225,6 @@ class GantryController:
         print("Homing servo to 0°...")
         self.move_servo_to(0.0)
         self.lcd_status('Servo at 0.0 deg', f'enc:{self.theta_deg:.1f}')
-
-        self.lcd_status('Moving servo...', 'theta -> 100 deg')
-        print("Moving servo to 100°...")
-        self.move_servo_to(100.0)
-        self.lcd_status('Servo at 100 deg', f'enc:{self.theta_deg:.1f}')
 
         self.lcd_status('Moving chain...', '+3000 steps')
         print("Moving chain 3000 steps forward...")
